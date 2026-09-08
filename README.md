@@ -51,7 +51,8 @@ python -m http.server -d site 8000
 ```
 
 대시보드를 데이터 없이 먼저 보고 싶으면:
-`PYTHONPATH=tool python -m perfkit seed-demo` (40회 CI run 을 흉내낸 데모 히스토리 생성)
+`PYTHONPATH=tool python -m perfkit seed-demo` 로 40회 CI run 을 흉내낸 데모 히스토리를 만든 뒤 위 5)를 실행하세요.
+대시보드를 파일 하나로 들고 다니려면(사내 공유, fetch 가 막힌 환경) `perfkit dashboard --inline`.
 
 자체 점검: `python tool/test_perfkit.py`
 

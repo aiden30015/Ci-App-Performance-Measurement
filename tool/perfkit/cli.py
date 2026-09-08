@@ -197,16 +197,29 @@ def cmd_store(a) -> int:
 def cmd_dashboard(a) -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copy(ROOT / "dashboard" / "index.html", out / "index.html")
-    for f in (store.HISTORY, store.REGRESSIONS):
+    html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
+    base_src = ROOT / "baseline" / "performance_baseline.json"
+
+    data = {"seed-history": [], "seed-regressions": [], "seed-baseline": None}
+    for key, f in (("seed-history", store.HISTORY), ("seed-regressions", store.REGRESSIONS)):
         src = Path(a.data) / f
-        if src.exists():
-            shutil.copy(src, out / f)
-        else:
-            (out / f).write_text("", encoding="utf-8")
-    if (ROOT / "baseline" / "performance_baseline.json").exists():
-        shutil.copy(ROOT / "baseline" / "performance_baseline.json", out / "baseline.json")
-    print(f"[perfkit] dashboard → {out}")
+        data[key] = store.read(src)
+        (out / f).write_text(src.read_text(encoding="utf-8") if src.exists() else "",
+                             encoding="utf-8")
+    if base_src.exists():
+        shutil.copy(base_src, out / "baseline.json")
+        data["seed-baseline"] = json.loads(base_src.read_text(encoding="utf-8"))
+
+    if a.inline:
+        # fetch 가 막힌 곳(로컬 파일 열기, 샌드박스)에서도 보이도록 데이터를 페이지에
+        # 심는다. 정상 호스팅에서는 fetch 가 이기므로 이 값은 쓰이지 않는다.
+        for key, value in data.items():
+            head = f'<script id="{key}" type="application/json">'
+            start = html.index(head) + len(head)
+            end = html.index("</script>", start)
+            html = html[:start] + json.dumps(value, separators=(",", ":")) + html[end:]
+    (out / "index.html").write_text(html, encoding="utf-8")
+    print(f"[perfkit] dashboard → {out}" + (" (데이터 인라인)" if a.inline else ""))
     return 0
 
 
@@ -330,6 +343,8 @@ def main(argv=None) -> int:
     d = sub.add_parser("dashboard", help="정적 대시보드 디렉터리 생성")
     d.add_argument("--data", default="perf-history")
     d.add_argument("--out", default="site")
+    d.add_argument("--inline", action="store_true",
+                   help="데이터를 HTML 에 심어 단일 파일로 만든다 (fetch 불가 환경용)")
     d.set_defaults(fn=cmd_dashboard)
 
     sd = sub.add_parser("seed-demo", help="데모용 히스토리 생성")
