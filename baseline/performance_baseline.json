@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "updated_at": "2026-09-07T23:04:48+00:00",
+  "commit": "fd0a4a573a4ffce4caea025556987cca9f982347",
+  "device_profile": "local-windows",
+  "repeats": 2,
+  "scenarios": {
+    "app_startup": {
+      "metrics": {
+        "startup_ms": {
+          "value": 39.401,
+          "noise": 16.8231
+        },
+        "startup_rasterized_ms": {
+          "value": 126.7555,
+          "noise": 24.7676
+        }
+      }
+    },
+    "community_detail": {
+      "metrics": {
+        "fps": {
+          "value": 60.0,
+          "noise": 0.0
+        },
+        "jank_rate": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "dropped_frames": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "p50_frame_time_ms": {
+          "value": 3.2713,
+          "noise": 0.2702
+        },
+        "p90_frame_time_ms": {
+          "value": 4.9567,
+          "noise": 0.0011
+        },
+        "p95_frame_time_ms": {
+          "value": 5.5287,
+          "noise": 0.3801
+        },
+        "p99_frame_time_ms": {
+          "value": 6.9453,
+          "noise": 0.1686
+        },
+        "memory_mb": {
+          "value": 311.334,
+          "noise": 7.7518
+        },
+        "duration_ms": {
+          "value": 37984.0,
+          "noise": 621.2094
+        }
+      }
+    },
+    "community_scroll": {
+      "metrics": {
+        "fps": {
+          "value": 60.0,
+          "noise": 0.0
+        },
+        "jank_rate": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "dropped_frames": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "p50_frame_time_ms": {
+          "value": 5.0835,
+          "noise": 0.1016
+        },
+        "p90_frame_time_ms": {
+          "value": 8.5683,
+          "noise": 0.2762
+        },
+        "p95_frame_time_ms": {
+          "value": 9.2957,
+          "noise": 0.4784
+        },
+        "p99_frame_time_ms": {
+          "value": 11.54,
+          "noise": 1.7638
+        },
+        "memory_mb": {
+          "value": 272.5508,
+          "noise": 0.3417
+        },
+        "duration_ms": {
+          "value": 38382.0,
+          "noise": 386.9586
+        }
+      }
+    },
+    "home_scroll": {
+      "metrics": {
+        "fps": {
+          "value": 60.0,
+          "noise": 0.0
+        },
+        "jank_rate": {
+          "value": 1.5749,
+          "noise": 0.0184
+        },
+        "dropped_frames": {
+          "value": 1.0,
+          "noise": 0.0
+        },
+        "p50_frame_time_ms": {
+          "value": 4.6327,
+          "noise": 1.6839
+        },
+        "p90_frame_time_ms": {
+          "value": 9.6115,
+          "noise": 1.7761
+        },
+        "p95_frame_time_ms": {
+          "value": 10.7296,
+          "noise": 1.8295
+        },
+        "p99_frame_time_ms": {
+          "value": 16.237,
+          "noise": 1.5353
+        },
+        "memory_mb": {
+          "value": 217.7031,
+          "noise": 3.1042
+        },
+        "duration_ms": {
+          "value": 37732.0,
+          "noise": 727.9566
+        }
+      }
+    },
+    "image_heavy_screen": {
+      "metrics": {
+        "fps": {
+          "value": 60.0,
+          "noise": 0.0
+        },
+        "jank_rate": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "dropped_frames": {
+          "value": 0.0,
+          "noise": 0.0
+        },
+        "p50_frame_time_ms": {
+          "value": 3.4827,
+          "noise": 0.7409
+        },
+        "p90_frame_time_ms": {
+          "value": 5.5849,
+          "noise": 0.8052
+        },
+        "p95_frame_time_ms": {
+          "value": 6.2791,
+          "noise": 1.5572
+        },
+        "p99_frame_time_ms": {
+          "value": 7.5375,
+          "noise": 1.7421
+        },
+        "memory_mb": {
+          "value": 378.5781,
+          "noise": 2.6003
+        },
+        "duration_ms": {
+          "value": 37993.0,
+          "noise": 434.4018
+        }
+      }
+    },
+    "login": {
+      "metrics": {
+        "fps": {
+          "value": 60.0,
+          "noise": 0.0
+        },
+        "jank_rate": {
+          "value": 36.6667,
+          "noise": 4.942
+        },
+        "dropped_frames": {
+          "value": 2.0,
+          "noise": 0.0
+        },
+        "p50_frame_time_ms": {
+          "value": 11.4713,
+          "noise": 0.6179
+        },
+        "p90_frame_time_ms": {
+          "value": 41.803,
+          "noise": 6.2551
+        },
+        "p95_frame_time_ms": {
+          "value": 51.6837,
+          "noise": 5.532
+        },
+        "p99_frame_time_ms": {
+          "value": 59.5884,
+          "noise": 4.9534
+        },
+        "memory_mb": {
+          "value": 171.9727,
+          "noise": 3.8976
+        },
+        "duration_ms": {
+          "value": 377.5,
+          "noise": 21.4977
+        }
+      }
+    }
+  }
+}

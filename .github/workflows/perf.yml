@@ -1,0 +1,165 @@
+name: perf
+
+# PR: baseline 과 비교해 회귀면 실패시킨다.
+# main push: 같은 측정을 하고 결과를 perf-history 브랜치에 append + 대시보드 배포.
+# 수동 실행: rebaseline=true 로 새 baseline PR 을 만든다.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rebaseline:
+        description: '현재 측정값으로 baseline 을 갱신하는 PR 생성'
+        type: boolean
+        default: false
+      repeats:
+        description: '반복 측정 횟수 (기본값은 perf.yaml)'
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      regressed: ${{ steps.check.outcome == 'failure' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+
+      - run: flutter pub get
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # 측정. 러너 성능 편차를 줄이려고 같은 세션에서 N회 반복한다 (docs/DESIGN.md §6.2).
+      - name: Measure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          script: |
+            export PERF_DEVICE=$(adb devices | awk 'NR==2{print $1}')
+            PYTHONPATH=tool python -m perfkit run --out runs \
+              ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }}
+
+      - name: Aggregate
+        run: PYTHONPATH=tool python -m perfkit aggregate --runs runs --out current.json
+
+      - name: Check against baseline
+        id: check
+        continue-on-error: true
+        run: |
+          PYTHONPATH=tool python -m perfkit check \
+            --current current.json \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out perf_report.md --rows-out perf_rows.json
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body-file perf_report.md --edit-last --create-if-none
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-raw-${{ github.run_id }}
+          path: |
+            runs/
+            current.json
+            perf_rows.json
+            perf_report.md
+          retention-days: 30
+
+      # ---- main 에 머지된 결과만 장기 히스토리에 쌓는다 (PR 측정값은 브랜치 상태라 추세를 오염시킨다).
+      - name: Append history
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git fetch origin perf-history || true
+          git worktree add ../history perf-history 2>/dev/null \
+            || git worktree add --orphan -b perf-history ../history
+          PYTHONPATH=tool python -m perfkit store \
+            --current current.json --rows perf_rows.json --out ../history \
+            --commit "${{ github.sha }}" --branch main --run-id "${{ github.run_id }}"
+          cd ../history
+          git add -A && git commit -m "perf: run ${{ github.run_id }} (${{ github.sha }})" && git push origin perf-history
+
+      - name: Build dashboard
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: PYTHONPATH=tool python -m perfkit dashboard --data ../history --out site
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        with:
+          path: site
+
+      # ---- 수동 rebaseline: 자동 커밋하지 않고 리뷰 가능한 PR 로 만든다 (DESIGN §6.4).
+      - name: Rebaseline PR
+        if: inputs.rebaseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH=tool python -m perfkit rebaseline \
+            --current current.json --commit "${{ github.sha }}" | tee rebaseline.log
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          branch="perf/rebaseline-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git add baseline/performance_baseline.json
+          git commit -m "perf: rebaseline from ${{ github.sha }}"
+          git push origin "$branch"
+          gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
+            --body "$(printf 'run %s 의 측정값으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
+                      "${{ github.run_id }}" "$(cat rebaseline.log)")"
+
+      - name: Fail on regression
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo '::error::성능 회귀가 감지되었습니다. Job Summary 의 리포트를 확인하세요.'
+          exit 1
+
+  deploy-dashboard:
+    needs: perf
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

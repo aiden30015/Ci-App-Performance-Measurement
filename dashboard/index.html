@@ -1,0 +1,782 @@
+<title>Flutter Performance Trends</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    color-scheme: light;
+    --plane: #f4f6f3;
+    --surface: #ffffff;
+    --ink: #0f1211;
+    --ink-2: #565a57;
+    --muted: #82867f;
+    --grid: #e5e8e1;
+    --axis: #c6cac1;
+    --border: rgba(15, 18, 17, .12);
+    --shade: rgba(15, 18, 17, .04);
+    --good: #0ca30c;
+    --warn: #fab219;
+    --bad: #d03b3b;
+    --good-ink: #006300;
+    --bad-ink: #b02c2c;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+    --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --plane: #0d0f0e;
+      --surface: #191b19;
+      --ink: #f3f5f1;
+      --ink-2: #b8bcb5;
+      --muted: #8a8e87;
+      --grid: #2a2d2a;
+      --axis: #3b3f3b;
+      --border: rgba(255, 255, 255, .12);
+      --shade: rgba(255, 255, 255, .04);
+      --good-ink: #0ca30c;
+      --bad-ink: #e07272;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+      --s4: #c98500; --s5: #d55181; --s6: #008300;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --plane: #0d0f0e;
+    --surface: #191b19;
+    --ink: #f3f5f1;
+    --ink-2: #b8bcb5;
+    --muted: #8a8e87;
+    --grid: #2a2d2a;
+    --axis: #3b3f3b;
+    --border: rgba(255, 255, 255, .12);
+    --shade: rgba(255, 255, 255, .04);
+    --good-ink: #0ca30c;
+    --bad-ink: #e07272;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70;
+    --s4: #c98500; --s5: #d55181; --s6: #008300;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--ink);
+    font: 400 14px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 4px; }
+  h1 { font-size: 24px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace; }
+
+  /* filters: one row, above everything they scope */
+  .filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin: 20px 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border);
+  }
+  .filters .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin-right: 2px;
+  }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button, .chip {
+    font: inherit; font-size: 13px; color: var(--ink-2); background: var(--surface);
+    border: 0; padding: 6px 12px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+  .chip {
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .chip[aria-pressed="true"] { border-color: currentColor; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .chip[aria-pressed="false"] .dot { opacity: .25; }
+  .chip .name { color: var(--ink); }
+  .chip[aria-pressed="false"] .name { color: var(--muted); }
+  button:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--s1); outline-offset: 2px;
+  }
+  .spacer { flex: 1 1 auto; }
+
+  /* scenario summary: latest run against baseline */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 10px;
+    border-left: 3px solid var(--tile-accent, var(--axis));
+  }
+  .tile.is-fail { --tile-accent: var(--bad); }
+  .tile-head { display: flex; align-items: center; gap: 8px; }
+  .tile-head .name { font-weight: 600; font-size: 14px; }
+  .pill {
+    margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .pill.ok { color: var(--good-ink); }
+  .pill.bad { color: var(--bad-ink); }
+  .rows { display: grid; gap: 5px; }
+  .row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline; font-size: 13px; }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; }
+  .row .d { font-variant-numeric: tabular-nums; font-size: 12px; min-width: 62px; text-align: right; }
+  .d.up-bad, .d.down-bad { color: var(--bad-ink); font-weight: 600; }
+  .d.good { color: var(--good-ink); }
+  .d.flat { color: var(--muted); }
+  .spark { display: block; width: 100%; height: 30px; }
+
+  /* charts */
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px 12px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0; }
+  .card .unit { color: var(--muted); font-weight: 400; }
+  .card .hint { color: var(--muted); font-size: 12px; margin: 2px 0 10px; }
+  .plot { position: relative; height: 210px; }
+  h2.section {
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--muted); margin: 34px 0 12px;
+  }
+
+  /* run detail + regression log */
+  .detail {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; display: grid; gap: 12px;
+  }
+  .detail .meta { display: flex; flex-wrap: wrap; gap: 6px 20px; align-items: baseline; }
+  .detail .meta b { font-weight: 600; }
+  .kv { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  details > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 6px 0; }
+  a { color: var(--s1); }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+  .note {
+    font-size: 12px; color: var(--muted); margin-top: 28px; padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Flutter Performance Trends</h1>
+    <span class="sub" id="source-note"></span>
+    <span class="spacer"></span>
+    <span class="sub mono" id="last-run"></span>
+  </header>
+
+  <div class="filters">
+    <span class="label">기간</span>
+    <div class="seg" id="range" role="group" aria-label="기간 필터"></div>
+    <span class="label" style="margin-left:12px">시나리오</span>
+    <span id="scenarios"></span>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <h2 class="section">지표별 추세 <span id="trend-scope" class="mono" style="text-transform:none;letter-spacing:0"></span></h2>
+  <div class="charts" id="charts"></div>
+
+  <h2 class="section">선택한 CI Run</h2>
+  <div class="detail" id="run-detail"></div>
+
+  <h2 class="section">Regression 이력</h2>
+  <div class="detail">
+    <div class="scroll"><table id="reg-table">
+      <thead><tr>
+        <th>발생 시각</th><th>Scenario</th><th>Metric</th>
+        <th class="num">Baseline</th><th class="num">측정값</th><th class="num">변화</th><th>Commit / PR</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="empty" id="reg-empty" hidden>선택한 기간에 기록된 regression 이 없습니다.</div>
+  </div>
+
+  <details>
+    <summary>표로 보기 (선택 기간의 마지막 run)</summary>
+    <div class="scroll"><table id="table-view"><thead></thead><tbody></tbody></table></div>
+  </details>
+
+  <p class="note">
+    데이터: <span class="mono">history.jsonl</span> · <span class="mono">regressions.jsonl</span> (CI 가 append). ●
+    표시가 있는 지점은 그 run 에서 regression 으로 판정된 시나리오입니다. 점을 클릭하면 해당 CI run 의 커밋과
+    전체 지표를 볼 수 있습니다.
+  </p>
+</div>
+
+<script id="seed-history" type="application/json">[{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.815,"jank_rate":4.019,"memory_mb":117.412,"p95_frame_time_ms":19.054,"startup_ms":801.18},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":60,"repeats":3,"run_id":"100","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.161,"jank_rate":0.405,"memory_mb":119.037,"p95_frame_time_ms":9.568},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":60,"repeats":3,"run_id":"100","scenario":"login","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.181,"jank_rate":0.78,"memory_mb":155.617,"p95_frame_time_ms":11.979},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":60,"repeats":3,"run_id":"100","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.857,"jank_rate":1.439,"memory_mb":174.596,"p95_frame_time_ms":13.789},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":60,"repeats":3,"run_id":"100","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.186,"jank_rate":1.243,"memory_mb":181.875,"p95_frame_time_ms":17.155},"noise":{"fps":0.768,"jank_rate":0.064,"memory_mb":2.246,"p95_frame_time_ms":0.255},"pr":60,"repeats":3,"run_id":"100","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"52e6b43","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.362,"jank_rate":5.867,"memory_mb":236.611,"p95_frame_time_ms":21.183},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":60,"repeats":3,"run_id":"100","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-07-29T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.588,"jank_rate":4.102,"memory_mb":118.253,"p95_frame_time_ms":19.218,"startup_ms":824.141},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":61,"repeats":3,"run_id":"101","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.766,"jank_rate":0.331,"memory_mb":118.813,"p95_frame_time_ms":9.359},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":61,"repeats":3,"run_id":"101","scenario":"login","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.594,"jank_rate":0.78,"memory_mb":160.958,"p95_frame_time_ms":11.57},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":61,"repeats":3,"run_id":"101","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.227,"jank_rate":1.539,"memory_mb":175.325,"p95_frame_time_ms":14.162},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":61,"repeats":3,"run_id":"101","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.274,"jank_rate":1.317,"memory_mb":183.964,"p95_frame_time_ms":16.925},"noise":{"fps":0.767,"jank_rate":0.065,"memory_mb":2.257,"p95_frame_time_ms":0.256},"pr":61,"repeats":3,"run_id":"101","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"ae97ba9","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.538,"jank_rate":6.053,"memory_mb":241.558,"p95_frame_time_ms":21.324},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":61,"repeats":3,"run_id":"101","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-07-30T13:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.051,"jank_rate":4.191,"memory_mb":119.771,"p95_frame_time_ms":18.373,"startup_ms":831.166},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":62,"repeats":3,"run_id":"102","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.461,"jank_rate":0.425,"memory_mb":119.258,"p95_frame_time_ms":9.206},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":62,"repeats":3,"run_id":"102","scenario":"login","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.502,"jank_rate":0.694,"memory_mb":160.793,"p95_frame_time_ms":12.007},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":62,"repeats":3,"run_id":"102","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.742,"jank_rate":1.487,"memory_mb":175.145,"p95_frame_time_ms":14.334},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":62,"repeats":3,"run_id":"102","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.113,"jank_rate":1.348,"memory_mb":183.769,"p95_frame_time_ms":17.534},"noise":{"fps":0.765,"jank_rate":0.067,"memory_mb":2.268,"p95_frame_time_ms":0.257},"pr":62,"repeats":3,"run_id":"102","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"2a3af4d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.77,"jank_rate":5.947,"memory_mb":236.014,"p95_frame_time_ms":20.383},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":62,"repeats":3,"run_id":"102","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-07-31T18:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.454,"jank_rate":3.912,"memory_mb":118.239,"p95_frame_time_ms":18.792,"startup_ms":827.98},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":63,"repeats":3,"run_id":"103","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.943,"jank_rate":0.345,"memory_mb":119.129,"p95_frame_time_ms":9.666},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":63,"repeats":3,"run_id":"103","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.291,"jank_rate":0.852,"memory_mb":161.053,"p95_frame_time_ms":11.982},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":63,"repeats":3,"run_id":"103","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.723,"jank_rate":1.536,"memory_mb":166.03,"p95_frame_time_ms":13.827},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":63,"repeats":3,"run_id":"103","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.223,"jank_rate":1.41,"memory_mb":186.641,"p95_frame_time_ms":17.293},"noise":{"fps":0.764,"jank_rate":0.068,"memory_mb":2.278,"p95_frame_time_ms":0.257},"pr":63,"repeats":3,"run_id":"103","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"5affb22","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.13,"jank_rate":6.146,"memory_mb":240.418,"p95_frame_time_ms":21.568},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":63,"repeats":3,"run_id":"103","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-01T13:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.917,"jank_rate":4.054,"memory_mb":117.566,"p95_frame_time_ms":18.628,"startup_ms":817.86},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":64,"repeats":3,"run_id":"104","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.362,"jank_rate":0.485,"memory_mb":118.625,"p95_frame_time_ms":9.189},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":64,"repeats":3,"run_id":"104","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.857,"jank_rate":0.684,"memory_mb":162.841,"p95_frame_time_ms":12.106},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":64,"repeats":3,"run_id":"104","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.256,"jank_rate":1.436,"memory_mb":170.094,"p95_frame_time_ms":13.92},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":64,"repeats":3,"run_id":"104","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.98,"jank_rate":1.524,"memory_mb":189.056,"p95_frame_time_ms":17.438},"noise":{"fps":0.763,"jank_rate":0.069,"memory_mb":2.289,"p95_frame_time_ms":0.258},"pr":64,"repeats":3,"run_id":"104","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"2eae05c","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.423,"jank_rate":6.127,"memory_mb":243.032,"p95_frame_time_ms":21.261},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":64,"repeats":3,"run_id":"104","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-02T14:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.579,"jank_rate":4.128,"memory_mb":118.905,"p95_frame_time_ms":18.879,"startup_ms":822.888},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":65,"repeats":3,"run_id":"105","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.222,"jank_rate":0.455,"memory_mb":119.441,"p95_frame_time_ms":9.714},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":65,"repeats":3,"run_id":"105","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.524,"jank_rate":0.805,"memory_mb":160.407,"p95_frame_time_ms":11.466},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":65,"repeats":3,"run_id":"105","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.943,"jank_rate":1.507,"memory_mb":174.768,"p95_frame_time_ms":14.224},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":65,"repeats":3,"run_id":"105","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.297,"jank_rate":1.57,"memory_mb":184.91,"p95_frame_time_ms":17.289},"noise":{"fps":0.762,"jank_rate":0.07,"memory_mb":2.3,"p95_frame_time_ms":0.259},"pr":65,"repeats":3,"run_id":"105","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"895fd7b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.006,"jank_rate":6.289,"memory_mb":243.424,"p95_frame_time_ms":20.701},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":65,"repeats":3,"run_id":"105","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-03T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.032,"jank_rate":3.918,"memory_mb":117.499,"p95_frame_time_ms":18.924,"startup_ms":826.748},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":66,"repeats":3,"run_id":"106","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.232,"jank_rate":0.443,"memory_mb":120.317,"p95_frame_time_ms":9.416},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":66,"repeats":3,"run_id":"106","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.846,"jank_rate":0.715,"memory_mb":157.37,"p95_frame_time_ms":11.995},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":66,"repeats":3,"run_id":"106","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.719,"jank_rate":1.502,"memory_mb":172.143,"p95_frame_time_ms":13.857},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":66,"repeats":3,"run_id":"106","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.028,"jank_rate":1.756,"memory_mb":184.659,"p95_frame_time_ms":17.296},"noise":{"fps":0.761,"jank_rate":0.071,"memory_mb":2.311,"p95_frame_time_ms":0.26},"pr":66,"repeats":3,"run_id":"106","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"ea05754","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.554,"jank_rate":6.215,"memory_mb":238.107,"p95_frame_time_ms":20.965},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":66,"repeats":3,"run_id":"106","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-04T12:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.085,"jank_rate":3.782,"memory_mb":121.641,"p95_frame_time_ms":19.213,"startup_ms":818.151},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":67,"repeats":3,"run_id":"107","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.642,"jank_rate":0.429,"memory_mb":120.976,"p95_frame_time_ms":9.516},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":67,"repeats":3,"run_id":"107","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.204,"jank_rate":0.88,"memory_mb":157.787,"p95_frame_time_ms":12.301},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":67,"repeats":3,"run_id":"107","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.496,"jank_rate":1.513,"memory_mb":171.153,"p95_frame_time_ms":14.028},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":67,"repeats":3,"run_id":"107","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.282,"jank_rate":1.696,"memory_mb":185.513,"p95_frame_time_ms":17.607},"noise":{"fps":0.76,"jank_rate":0.072,"memory_mb":2.322,"p95_frame_time_ms":0.26},"pr":67,"repeats":3,"run_id":"107","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"9aea642","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.04,"jank_rate":6.011,"memory_mb":237.445,"p95_frame_time_ms":21.066},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":67,"repeats":3,"run_id":"107","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-05T14:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.4,"jank_rate":4.06,"memory_mb":117.227,"p95_frame_time_ms":19.422,"startup_ms":822.484},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":68,"repeats":3,"run_id":"108","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.352,"jank_rate":0.469,"memory_mb":120.291,"p95_frame_time_ms":9.789},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":68,"repeats":3,"run_id":"108","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.495,"jank_rate":0.877,"memory_mb":158.993,"p95_frame_time_ms":11.518},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":68,"repeats":3,"run_id":"108","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.006,"jank_rate":1.466,"memory_mb":177.6,"p95_frame_time_ms":13.965},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":68,"repeats":3,"run_id":"108","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.26,"jank_rate":1.867,"memory_mb":192.475,"p95_frame_time_ms":17.322},"noise":{"fps":0.759,"jank_rate":0.073,"memory_mb":2.332,"p95_frame_time_ms":0.261},"pr":68,"repeats":3,"run_id":"108","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"cd02c5e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.18,"jank_rate":6.158,"memory_mb":240.541,"p95_frame_time_ms":20.592},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":68,"repeats":3,"run_id":"108","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-06T17:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.551,"jank_rate":4.008,"memory_mb":117.91,"p95_frame_time_ms":19.369,"startup_ms":830.289},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":69,"repeats":3,"run_id":"109","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.148,"jank_rate":0.488,"memory_mb":121.311,"p95_frame_time_ms":9.39},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":69,"repeats":3,"run_id":"109","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.458,"jank_rate":0.735,"memory_mb":162.106,"p95_frame_time_ms":11.619},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":69,"repeats":3,"run_id":"109","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.657,"jank_rate":1.499,"memory_mb":171.94,"p95_frame_time_ms":13.958},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":69,"repeats":3,"run_id":"109","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.542,"jank_rate":2.027,"memory_mb":191.204,"p95_frame_time_ms":18.109},"noise":{"fps":0.758,"jank_rate":0.074,"memory_mb":2.343,"p95_frame_time_ms":0.262},"pr":69,"repeats":3,"run_id":"109","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"4affdcd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.893,"jank_rate":6.122,"memory_mb":236.309,"p95_frame_time_ms":20.94},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":69,"repeats":3,"run_id":"109","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-07T16:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.056,"jank_rate":3.986,"memory_mb":117.322,"p95_frame_time_ms":19.028,"startup_ms":813.054},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":70,"repeats":3,"run_id":"110","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.785,"jank_rate":0.384,"memory_mb":118.088,"p95_frame_time_ms":9.778},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":70,"repeats":3,"run_id":"110","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.852,"jank_rate":0.808,"memory_mb":157.458,"p95_frame_time_ms":11.573},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":70,"repeats":3,"run_id":"110","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.968,"jank_rate":1.419,"memory_mb":171.183,"p95_frame_time_ms":13.991},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":70,"repeats":3,"run_id":"110","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.123,"jank_rate":2.016,"memory_mb":195.405,"p95_frame_time_ms":17.638},"noise":{"fps":0.757,"jank_rate":0.075,"memory_mb":2.354,"p95_frame_time_ms":0.262},"pr":70,"repeats":3,"run_id":"110","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"537390e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.088,"jank_rate":6.208,"memory_mb":239.774,"p95_frame_time_ms":20.495},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":70,"repeats":3,"run_id":"110","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-08T17:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.954,"jank_rate":4.029,"memory_mb":119.143,"p95_frame_time_ms":18.873,"startup_ms":827.393},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":71,"repeats":3,"run_id":"111","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.513,"jank_rate":0.418,"memory_mb":120.983,"p95_frame_time_ms":9.719},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":71,"repeats":3,"run_id":"111","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.247,"jank_rate":0.676,"memory_mb":162.58,"p95_frame_time_ms":12.174},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":71,"repeats":3,"run_id":"111","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.373,"jank_rate":1.468,"memory_mb":168.283,"p95_frame_time_ms":14.423},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":71,"repeats":3,"run_id":"111","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.164,"jank_rate":2.375,"memory_mb":194.531,"p95_frame_time_ms":17.516},"noise":{"fps":0.756,"jank_rate":0.076,"memory_mb":2.365,"p95_frame_time_ms":0.263},"pr":71,"repeats":3,"run_id":"111","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"f179f2d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.896,"jank_rate":5.985,"memory_mb":242.645,"p95_frame_time_ms":21.169},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":71,"repeats":3,"run_id":"111","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-09T13:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.738,"jank_rate":4.055,"memory_mb":120.132,"p95_frame_time_ms":18.814,"startup_ms":832.475},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":72,"repeats":3,"run_id":"112","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.119,"jank_rate":0.39,"memory_mb":118.979,"p95_frame_time_ms":9.511},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":72,"repeats":3,"run_id":"112","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.837,"jank_rate":0.778,"memory_mb":163.457,"p95_frame_time_ms":11.995},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":72,"repeats":3,"run_id":"112","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.474,"jank_rate":1.531,"memory_mb":171.941,"p95_frame_time_ms":13.982},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":72,"repeats":3,"run_id":"112","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.933,"jank_rate":2.291,"memory_mb":195.509,"p95_frame_time_ms":17.614},"noise":{"fps":0.755,"jank_rate":0.077,"memory_mb":2.376,"p95_frame_time_ms":0.264},"pr":72,"repeats":3,"run_id":"112","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"83feb17","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.064,"jank_rate":6.192,"memory_mb":239.91,"p95_frame_time_ms":20.705},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":72,"repeats":3,"run_id":"112","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-10T15:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.424,"jank_rate":3.863,"memory_mb":118.427,"p95_frame_time_ms":18.815,"startup_ms":821.814},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":73,"repeats":3,"run_id":"113","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.693,"jank_rate":0.347,"memory_mb":121.546,"p95_frame_time_ms":9.848},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":73,"repeats":3,"run_id":"113","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.982,"jank_rate":0.72,"memory_mb":161.949,"p95_frame_time_ms":12.33},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":73,"repeats":3,"run_id":"113","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.993,"jank_rate":1.555,"memory_mb":172.551,"p95_frame_time_ms":13.81},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":73,"repeats":3,"run_id":"113","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.002,"jank_rate":2.311,"memory_mb":195.948,"p95_frame_time_ms":17.864},"noise":{"fps":0.754,"jank_rate":0.078,"memory_mb":2.386,"p95_frame_time_ms":0.265},"pr":73,"repeats":3,"run_id":"113","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"eb4ed2e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.962,"jank_rate":5.985,"memory_mb":241.104,"p95_frame_time_ms":21.138},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":73,"repeats":3,"run_id":"113","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-11T16:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.193,"jank_rate":4.081,"memory_mb":120.329,"p95_frame_time_ms":18.841,"startup_ms":817.107},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":74,"repeats":3,"run_id":"114","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.878,"jank_rate":0.422,"memory_mb":121.124,"p95_frame_time_ms":9.636},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":74,"repeats":3,"run_id":"114","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.966,"jank_rate":0.896,"memory_mb":158.788,"p95_frame_time_ms":12.03},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":74,"repeats":3,"run_id":"114","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.444,"jank_rate":1.343,"memory_mb":175.069,"p95_frame_time_ms":14.08},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":74,"repeats":3,"run_id":"114","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.401,"jank_rate":2.375,"memory_mb":196.814,"p95_frame_time_ms":18.068},"noise":{"fps":0.752,"jank_rate":0.08,"memory_mb":2.397,"p95_frame_time_ms":0.265},"pr":74,"repeats":3,"run_id":"114","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"0ce5af6","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.863,"jank_rate":5.814,"memory_mb":242.668,"p95_frame_time_ms":20.981},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":74,"repeats":3,"run_id":"114","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-12T13:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.925,"jank_rate":3.993,"memory_mb":122.143,"p95_frame_time_ms":18.849,"startup_ms":818.142},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":75,"repeats":3,"run_id":"115","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.068,"jank_rate":0.392,"memory_mb":117.825,"p95_frame_time_ms":9.262},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":75,"repeats":3,"run_id":"115","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.665,"jank_rate":0.808,"memory_mb":158.338,"p95_frame_time_ms":11.904},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":75,"repeats":3,"run_id":"115","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.566,"jank_rate":1.493,"memory_mb":170.111,"p95_frame_time_ms":13.728},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":75,"repeats":3,"run_id":"115","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.912,"jank_rate":2.564,"memory_mb":196.704,"p95_frame_time_ms":17.997},"noise":{"fps":0.751,"jank_rate":0.081,"memory_mb":2.408,"p95_frame_time_ms":0.266},"pr":75,"repeats":3,"run_id":"115","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"d510bb0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.066,"jank_rate":6.082,"memory_mb":239.755,"p95_frame_time_ms":21.266},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":75,"repeats":3,"run_id":"115","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-13T17:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.095,"jank_rate":4.061,"memory_mb":118.528,"p95_frame_time_ms":18.941,"startup_ms":817.388},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":76,"repeats":3,"run_id":"116","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.106,"jank_rate":0.401,"memory_mb":122.311,"p95_frame_time_ms":9.784},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":76,"repeats":3,"run_id":"116","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.666,"jank_rate":0.849,"memory_mb":158.693,"p95_frame_time_ms":12.203},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":76,"repeats":3,"run_id":"116","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.999,"jank_rate":1.48,"memory_mb":175.996,"p95_frame_time_ms":13.933},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":76,"repeats":3,"run_id":"116","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.973,"jank_rate":2.737,"memory_mb":198.092,"p95_frame_time_ms":18.527},"noise":{"fps":0.75,"jank_rate":0.082,"memory_mb":2.419,"p95_frame_time_ms":0.267},"pr":76,"repeats":3,"run_id":"116","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"08d1801","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.526,"jank_rate":6.017,"memory_mb":237.606,"p95_frame_time_ms":20.52},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":76,"repeats":3,"run_id":"116","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-14T14:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.022,"jank_rate":4.112,"memory_mb":117.617,"p95_frame_time_ms":19.41,"startup_ms":808.422},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":77,"repeats":3,"run_id":"117","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.92,"jank_rate":0.437,"memory_mb":119.886,"p95_frame_time_ms":9.14},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":77,"repeats":3,"run_id":"117","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.918,"jank_rate":0.723,"memory_mb":159.673,"p95_frame_time_ms":12.013},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":77,"repeats":3,"run_id":"117","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.068,"jank_rate":1.388,"memory_mb":166.871,"p95_frame_time_ms":13.868},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":77,"repeats":3,"run_id":"117","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.073,"jank_rate":2.703,"memory_mb":199.199,"p95_frame_time_ms":18.488},"noise":{"fps":0.749,"jank_rate":0.083,"memory_mb":2.43,"p95_frame_time_ms":0.267},"pr":77,"repeats":3,"run_id":"117","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"9e6397d","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.196,"jank_rate":5.97,"memory_mb":240.284,"p95_frame_time_ms":20.907},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":77,"repeats":3,"run_id":"117","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-15T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.452,"jank_rate":3.986,"memory_mb":119.614,"p95_frame_time_ms":18.973,"startup_ms":840.772},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":78,"repeats":3,"run_id":"118","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.762,"jank_rate":0.419,"memory_mb":117.567,"p95_frame_time_ms":9.457},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":78,"repeats":3,"run_id":"118","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.693,"jank_rate":0.693,"memory_mb":160.819,"p95_frame_time_ms":12.058},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":78,"repeats":3,"run_id":"118","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.139,"jank_rate":1.502,"memory_mb":170.619,"p95_frame_time_ms":13.842},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":78,"repeats":3,"run_id":"118","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.508,"jank_rate":2.839,"memory_mb":200.899,"p95_frame_time_ms":18.092},"noise":{"fps":0.748,"jank_rate":0.084,"memory_mb":2.44,"p95_frame_time_ms":0.268},"pr":78,"repeats":3,"run_id":"118","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"04d2be0","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.175,"jank_rate":6.165,"memory_mb":241.266,"p95_frame_time_ms":21.124},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":78,"repeats":3,"run_id":"118","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-16T17:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.957,"jank_rate":3.913,"memory_mb":117.432,"p95_frame_time_ms":18.652,"startup_ms":816.349},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":79,"repeats":3,"run_id":"119","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.117,"jank_rate":0.407,"memory_mb":119.883,"p95_frame_time_ms":9.574},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":79,"repeats":3,"run_id":"119","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.08,"jank_rate":0.868,"memory_mb":158.438,"p95_frame_time_ms":11.959},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":79,"repeats":3,"run_id":"119","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.323,"jank_rate":1.525,"memory_mb":171.888,"p95_frame_time_ms":14.275},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":79,"repeats":3,"run_id":"119","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.97,"jank_rate":2.943,"memory_mb":200.443,"p95_frame_time_ms":18.021},"noise":{"fps":0.747,"jank_rate":0.085,"memory_mb":2.451,"p95_frame_time_ms":0.269},"pr":79,"repeats":3,"run_id":"119","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"54ef125","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.28,"jank_rate":6.067,"memory_mb":239.683,"p95_frame_time_ms":21.965},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":79,"repeats":3,"run_id":"119","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-17T14:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.491,"jank_rate":3.887,"memory_mb":118.288,"p95_frame_time_ms":19.108,"startup_ms":819.878},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":80,"repeats":3,"run_id":"120","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.4,"jank_rate":0.353,"memory_mb":119.183,"p95_frame_time_ms":9.672},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":80,"repeats":3,"run_id":"120","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.442,"jank_rate":0.843,"memory_mb":155.974,"p95_frame_time_ms":12.12},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":80,"repeats":3,"run_id":"120","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.621,"jank_rate":1.469,"memory_mb":175.041,"p95_frame_time_ms":14.079},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":80,"repeats":3,"run_id":"120","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.651,"jank_rate":2.885,"memory_mb":198.933,"p95_frame_time_ms":18.543},"noise":{"fps":0.746,"jank_rate":0.086,"memory_mb":2.462,"p95_frame_time_ms":0.27},"pr":80,"repeats":3,"run_id":"120","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"63087e5","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.861,"jank_rate":6.079,"memory_mb":238.798,"p95_frame_time_ms":21.187},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":80,"repeats":3,"run_id":"120","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-18T13:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.605,"jank_rate":4.06,"memory_mb":120.399,"p95_frame_time_ms":18.932,"startup_ms":821.194},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":81,"repeats":3,"run_id":"121","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.994,"jank_rate":0.42,"memory_mb":121.916,"p95_frame_time_ms":9.245},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":81,"repeats":3,"run_id":"121","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.454,"jank_rate":0.863,"memory_mb":156.136,"p95_frame_time_ms":12.014},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":81,"repeats":3,"run_id":"121","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.552,"jank_rate":1.522,"memory_mb":169.446,"p95_frame_time_ms":13.837},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":81,"repeats":3,"run_id":"121","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.086,"jank_rate":3.277,"memory_mb":202.74,"p95_frame_time_ms":18.143},"noise":{"fps":0.745,"jank_rate":0.087,"memory_mb":2.473,"p95_frame_time_ms":0.27},"pr":81,"repeats":3,"run_id":"121","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"65f456a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.688,"jank_rate":5.788,"memory_mb":240.312,"p95_frame_time_ms":20.934},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":81,"repeats":3,"run_id":"121","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-19T12:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.767,"jank_rate":4.118,"memory_mb":117.67,"p95_frame_time_ms":18.823,"startup_ms":840.137},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":82,"repeats":3,"run_id":"122","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.869,"jank_rate":0.336,"memory_mb":121.937,"p95_frame_time_ms":9.62},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":82,"repeats":3,"run_id":"122","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.087,"jank_rate":0.669,"memory_mb":158.854,"p95_frame_time_ms":12.039},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":82,"repeats":3,"run_id":"122","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.455,"jank_rate":1.452,"memory_mb":171.875,"p95_frame_time_ms":14.09},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":82,"repeats":3,"run_id":"122","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.038,"jank_rate":3.128,"memory_mb":203.003,"p95_frame_time_ms":18.193},"noise":{"fps":0.744,"jank_rate":0.088,"memory_mb":2.484,"p95_frame_time_ms":0.271},"pr":82,"repeats":3,"run_id":"122","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"c2fbd8a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.348,"jank_rate":5.97,"memory_mb":239.28,"p95_frame_time_ms":20.867},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":82,"repeats":3,"run_id":"122","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-20T17:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.769,"jank_rate":3.931,"memory_mb":122.097,"p95_frame_time_ms":19.004,"startup_ms":801.535},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":83,"repeats":3,"run_id":"123","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.598,"jank_rate":0.409,"memory_mb":120.608,"p95_frame_time_ms":9.525},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":83,"repeats":3,"run_id":"123","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.716,"jank_rate":0.822,"memory_mb":161.52,"p95_frame_time_ms":12.01},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":83,"repeats":3,"run_id":"123","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.152,"jank_rate":1.44,"memory_mb":169.819,"p95_frame_time_ms":14.0},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":83,"repeats":3,"run_id":"123","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.954,"jank_rate":3.326,"memory_mb":205.284,"p95_frame_time_ms":18.303},"noise":{"fps":0.743,"jank_rate":0.089,"memory_mb":2.494,"p95_frame_time_ms":0.272},"pr":83,"repeats":3,"run_id":"123","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"8027a2a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.052,"jank_rate":6.037,"memory_mb":239.694,"p95_frame_time_ms":21.153},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":83,"repeats":3,"run_id":"123","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-21T18:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.98,"jank_rate":3.858,"memory_mb":119.139,"p95_frame_time_ms":19.047,"startup_ms":820.097},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":84,"repeats":3,"run_id":"124","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.778,"jank_rate":0.272,"memory_mb":121.759,"p95_frame_time_ms":9.636},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":84,"repeats":3,"run_id":"124","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.629,"jank_rate":0.815,"memory_mb":158.946,"p95_frame_time_ms":12.007},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":84,"repeats":3,"run_id":"124","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.025,"jank_rate":1.411,"memory_mb":174.107,"p95_frame_time_ms":14.048},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":84,"repeats":3,"run_id":"124","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.641,"jank_rate":3.511,"memory_mb":208.726,"p95_frame_time_ms":18.314},"noise":{"fps":0.742,"jank_rate":0.09,"memory_mb":2.505,"p95_frame_time_ms":0.272},"pr":84,"repeats":3,"run_id":"124","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"80de8b3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":55.938,"jank_rate":6.001,"memory_mb":242.014,"p95_frame_time_ms":21.145},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":84,"repeats":3,"run_id":"124","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-22T16:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.748,"jank_rate":4.146,"memory_mb":116.501,"p95_frame_time_ms":18.84,"startup_ms":806.554},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":85,"repeats":3,"run_id":"125","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.06,"jank_rate":0.418,"memory_mb":120.64,"p95_frame_time_ms":9.778},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":85,"repeats":3,"run_id":"125","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.089,"jank_rate":0.933,"memory_mb":158.672,"p95_frame_time_ms":11.899},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":85,"repeats":3,"run_id":"125","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.004,"jank_rate":1.537,"memory_mb":169.527,"p95_frame_time_ms":13.779},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":85,"repeats":3,"run_id":"125","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.766,"jank_rate":3.473,"memory_mb":204.991,"p95_frame_time_ms":18.243},"noise":{"fps":0.741,"jank_rate":0.091,"memory_mb":2.516,"p95_frame_time_ms":0.273},"pr":85,"repeats":3,"run_id":"125","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"ae9c78b","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.098,"jank_rate":6.056,"memory_mb":239.748,"p95_frame_time_ms":20.965},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":85,"repeats":3,"run_id":"125","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-23T12:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.884,"jank_rate":4.084,"memory_mb":117.076,"p95_frame_time_ms":19.11,"startup_ms":807.723},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":86,"repeats":3,"run_id":"126","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.841,"jank_rate":0.456,"memory_mb":119.704,"p95_frame_time_ms":9.531},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":86,"repeats":3,"run_id":"126","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.691,"jank_rate":0.843,"memory_mb":159.512,"p95_frame_time_ms":12.379},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":86,"repeats":3,"run_id":"126","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.349,"jank_rate":1.51,"memory_mb":170.311,"p95_frame_time_ms":14.227},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":86,"repeats":3,"run_id":"126","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.087,"jank_rate":3.491,"memory_mb":204.753,"p95_frame_time_ms":18.249},"noise":{"fps":0.74,"jank_rate":0.092,"memory_mb":2.527,"p95_frame_time_ms":0.274},"pr":86,"repeats":3,"run_id":"126","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"4d307fe","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.066,"jank_rate":6.101,"memory_mb":240.616,"p95_frame_time_ms":21.011},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":86,"repeats":3,"run_id":"126","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-24T15:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.77,"jank_rate":3.931,"memory_mb":118.125,"p95_frame_time_ms":19.477,"startup_ms":826.947},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":87,"repeats":3,"run_id":"127","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.042,"jank_rate":0.354,"memory_mb":119.481,"p95_frame_time_ms":9.683},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":87,"repeats":3,"run_id":"127","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.11,"jank_rate":0.839,"memory_mb":161.452,"p95_frame_time_ms":11.751},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":87,"repeats":3,"run_id":"127","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.008,"jank_rate":1.488,"memory_mb":172.908,"p95_frame_time_ms":13.882},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":87,"repeats":3,"run_id":"127","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.773,"jank_rate":3.622,"memory_mb":207.586,"p95_frame_time_ms":18.812},"noise":{"fps":0.738,"jank_rate":0.094,"memory_mb":2.538,"p95_frame_time_ms":0.275},"pr":87,"repeats":3,"run_id":"127","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"7ee5e85","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.26,"jank_rate":6.162,"memory_mb":236.821,"p95_frame_time_ms":21.365},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":87,"repeats":3,"run_id":"127","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-25T13:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.606,"jank_rate":3.964,"memory_mb":121.158,"p95_frame_time_ms":19.257,"startup_ms":819.942},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":88,"repeats":3,"run_id":"128","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.804,"jank_rate":0.373,"memory_mb":119.061,"p95_frame_time_ms":9.363},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":88,"repeats":3,"run_id":"128","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.391,"jank_rate":0.802,"memory_mb":159.659,"p95_frame_time_ms":12.013},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":88,"repeats":3,"run_id":"128","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.3,"jank_rate":1.534,"memory_mb":173.405,"p95_frame_time_ms":13.969},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":88,"repeats":3,"run_id":"128","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.168,"jank_rate":3.611,"memory_mb":209.386,"p95_frame_time_ms":19.181},"noise":{"fps":0.737,"jank_rate":0.095,"memory_mb":2.548,"p95_frame_time_ms":0.275},"pr":88,"repeats":3,"run_id":"128","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"ff5e1d1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.792,"jank_rate":6.132,"memory_mb":235.416,"p95_frame_time_ms":21.104},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":88,"repeats":3,"run_id":"128","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-26T12:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.201,"jank_rate":3.863,"memory_mb":119.481,"p95_frame_time_ms":19.446,"startup_ms":821.924},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":89,"repeats":3,"run_id":"129","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.498,"jank_rate":0.313,"memory_mb":120.1,"p95_frame_time_ms":9.542},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":89,"repeats":3,"run_id":"129","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.496,"jank_rate":0.851,"memory_mb":163.264,"p95_frame_time_ms":11.986},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":89,"repeats":3,"run_id":"129","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.16,"jank_rate":1.463,"memory_mb":177.265,"p95_frame_time_ms":13.923},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":89,"repeats":3,"run_id":"129","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.764,"jank_rate":3.76,"memory_mb":206.916,"p95_frame_time_ms":18.79},"noise":{"fps":0.736,"jank_rate":0.096,"memory_mb":2.559,"p95_frame_time_ms":0.276},"pr":89,"repeats":3,"run_id":"129","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"316a2a1","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.49,"jank_rate":6.01,"memory_mb":233.476,"p95_frame_time_ms":21.024},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":89,"repeats":3,"run_id":"129","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-27T14:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.538,"jank_rate":4.011,"memory_mb":118.571,"p95_frame_time_ms":18.312,"startup_ms":829.37},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":90,"repeats":3,"run_id":"130","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.783,"jank_rate":0.4,"memory_mb":116.584,"p95_frame_time_ms":9.674},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":90,"repeats":3,"run_id":"130","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.972,"jank_rate":0.844,"memory_mb":159.735,"p95_frame_time_ms":12.319},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":90,"repeats":3,"run_id":"130","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.18,"jank_rate":1.513,"memory_mb":171.129,"p95_frame_time_ms":13.705},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":90,"repeats":3,"run_id":"130","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.67,"jank_rate":3.791,"memory_mb":211.498,"p95_frame_time_ms":19.269},"noise":{"fps":0.735,"jank_rate":0.097,"memory_mb":2.57,"p95_frame_time_ms":0.277},"pr":90,"repeats":3,"run_id":"130","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"a24c840","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.734,"jank_rate":6.002,"memory_mb":240.706,"p95_frame_time_ms":20.772},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":90,"repeats":3,"run_id":"130","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-28T12:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.077,"jank_rate":3.874,"memory_mb":121.237,"p95_frame_time_ms":19.692,"startup_ms":800.37},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":91,"repeats":3,"run_id":"131","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.97,"jank_rate":0.423,"memory_mb":120.997,"p95_frame_time_ms":9.658},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":91,"repeats":3,"run_id":"131","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.691,"jank_rate":0.737,"memory_mb":162.036,"p95_frame_time_ms":12.02},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":91,"repeats":3,"run_id":"131","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.766,"jank_rate":1.43,"memory_mb":167.904,"p95_frame_time_ms":13.995},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":91,"repeats":3,"run_id":"131","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.819,"jank_rate":3.947,"memory_mb":209.089,"p95_frame_time_ms":19.085},"noise":{"fps":0.734,"jank_rate":0.098,"memory_mb":2.581,"p95_frame_time_ms":0.278},"pr":91,"repeats":3,"run_id":"131","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"8d76d7a","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.847,"jank_rate":5.952,"memory_mb":238.053,"p95_frame_time_ms":20.985},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":91,"repeats":3,"run_id":"131","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-29T16:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.013,"jank_rate":4.057,"memory_mb":116.718,"p95_frame_time_ms":19.273,"startup_ms":815.417},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":92,"repeats":3,"run_id":"132","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.686,"jank_rate":0.465,"memory_mb":120.316,"p95_frame_time_ms":9.491},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":92,"repeats":3,"run_id":"132","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.288,"jank_rate":0.696,"memory_mb":161.789,"p95_frame_time_ms":11.511},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":92,"repeats":3,"run_id":"132","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.121,"jank_rate":1.555,"memory_mb":172.521,"p95_frame_time_ms":13.621},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":92,"repeats":3,"run_id":"132","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.812,"jank_rate":4.066,"memory_mb":214.381,"p95_frame_time_ms":19.155},"noise":{"fps":0.733,"jank_rate":0.099,"memory_mb":2.592,"p95_frame_time_ms":0.278},"pr":92,"repeats":3,"run_id":"132","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"3f5783e","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.347,"jank_rate":5.756,"memory_mb":235.918,"p95_frame_time_ms":20.652},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":92,"repeats":3,"run_id":"132","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-30T13:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.076,"jank_rate":3.989,"memory_mb":118.653,"p95_frame_time_ms":19.481,"startup_ms":818.435},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":93,"repeats":3,"run_id":"133","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.118,"jank_rate":0.357,"memory_mb":121.4,"p95_frame_time_ms":9.532},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":93,"repeats":3,"run_id":"133","scenario":"login","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.228,"jank_rate":0.831,"memory_mb":162.663,"p95_frame_time_ms":11.992},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":93,"repeats":3,"run_id":"133","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.301,"jank_rate":1.463,"memory_mb":172.134,"p95_frame_time_ms":14.194},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":93,"repeats":3,"run_id":"133","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.626,"jank_rate":4.112,"memory_mb":214.323,"p95_frame_time_ms":19.008},"noise":{"fps":0.732,"jank_rate":0.1,"memory_mb":2.602,"p95_frame_time_ms":0.279},"pr":93,"repeats":3,"run_id":"133","scenario":"community_detail","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"72f9202","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.762,"jank_rate":5.852,"memory_mb":240.525,"p95_frame_time_ms":21.129},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":93,"repeats":3,"run_id":"133","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-08-31T16:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.987,"jank_rate":3.957,"memory_mb":118.475,"p95_frame_time_ms":19.14,"startup_ms":816.584},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":94,"repeats":3,"run_id":"134","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.255,"jank_rate":0.39,"memory_mb":121.234,"p95_frame_time_ms":9.638},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":94,"repeats":3,"run_id":"134","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.707,"jank_rate":0.749,"memory_mb":156.593,"p95_frame_time_ms":11.926},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":94,"repeats":3,"run_id":"134","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.366,"jank_rate":1.565,"memory_mb":173.111,"p95_frame_time_ms":13.996},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":94,"repeats":3,"run_id":"134","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":49.766,"jank_rate":30.685,"memory_mb":282.732,"p95_frame_time_ms":25.493},"noise":{"fps":0.636,"jank_rate":0.418,"memory_mb":3.408,"p95_frame_time_ms":0.355},"pr":94,"repeats":3,"run_id":"134","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"65322a4","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.05,"jank_rate":6.053,"memory_mb":242.414,"p95_frame_time_ms":20.721},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":94,"repeats":3,"run_id":"134","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-01T17:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.443,"jank_rate":4.124,"memory_mb":115.961,"p95_frame_time_ms":19.033,"startup_ms":803.227},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":95,"repeats":3,"run_id":"135","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.911,"jank_rate":0.441,"memory_mb":121.281,"p95_frame_time_ms":9.366},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":95,"repeats":3,"run_id":"135","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.282,"jank_rate":0.839,"memory_mb":159.405,"p95_frame_time_ms":11.562},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":95,"repeats":3,"run_id":"135","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.289,"jank_rate":1.55,"memory_mb":166.805,"p95_frame_time_ms":14.192},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":95,"repeats":3,"run_id":"135","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":48.826,"jank_rate":31.53,"memory_mb":277.731,"p95_frame_time_ms":26.446},"noise":{"fps":0.635,"jank_rate":0.426,"memory_mb":3.422,"p95_frame_time_ms":0.356},"pr":95,"repeats":3,"run_id":"135","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"299c858","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.256,"jank_rate":6.004,"memory_mb":238.701,"p95_frame_time_ms":21.268},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":95,"repeats":3,"run_id":"135","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-02T13:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.987,"jank_rate":3.875,"memory_mb":120.175,"p95_frame_time_ms":19.261,"startup_ms":821.758},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":96,"repeats":3,"run_id":"136","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.772,"jank_rate":0.459,"memory_mb":120.427,"p95_frame_time_ms":9.246},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":96,"repeats":3,"run_id":"136","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.392,"jank_rate":0.742,"memory_mb":159.249,"p95_frame_time_ms":12.138},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":96,"repeats":3,"run_id":"136","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.862,"jank_rate":1.502,"memory_mb":172.489,"p95_frame_time_ms":14.35},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":96,"repeats":3,"run_id":"136","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":48.531,"jank_rate":31.293,"memory_mb":288.545,"p95_frame_time_ms":25.386},"noise":{"fps":0.634,"jank_rate":0.434,"memory_mb":3.436,"p95_frame_time_ms":0.357},"pr":96,"repeats":3,"run_id":"136","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"e77b047","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.835,"jank_rate":6.122,"memory_mb":236.087,"p95_frame_time_ms":21.275},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":96,"repeats":3,"run_id":"136","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-03T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.676,"jank_rate":3.886,"memory_mb":116.08,"p95_frame_time_ms":19.177,"startup_ms":826.525},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":97,"repeats":3,"run_id":"137","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.219,"jank_rate":0.419,"memory_mb":120.303,"p95_frame_time_ms":9.725},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":97,"repeats":3,"run_id":"137","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.338,"jank_rate":0.803,"memory_mb":156.584,"p95_frame_time_ms":12.029},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":97,"repeats":3,"run_id":"137","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.135,"jank_rate":1.511,"memory_mb":172.169,"p95_frame_time_ms":13.898},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":97,"repeats":3,"run_id":"137","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":49.029,"jank_rate":32.954,"memory_mb":285.384,"p95_frame_time_ms":26.02},"noise":{"fps":0.633,"jank_rate":0.441,"memory_mb":3.45,"p95_frame_time_ms":0.358},"pr":97,"repeats":3,"run_id":"137","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"4e640cd","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":57.287,"jank_rate":5.998,"memory_mb":239.082,"p95_frame_time_ms":20.918},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":97,"repeats":3,"run_id":"137","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-04T17:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.154,"jank_rate":3.884,"memory_mb":118.58,"p95_frame_time_ms":19.31,"startup_ms":802.526},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":98,"repeats":3,"run_id":"138","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":61.312,"jank_rate":0.471,"memory_mb":122.418,"p95_frame_time_ms":9.744},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":98,"repeats":3,"run_id":"138","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.87,"jank_rate":0.816,"memory_mb":162.277,"p95_frame_time_ms":11.883},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":98,"repeats":3,"run_id":"138","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.498,"jank_rate":1.646,"memory_mb":173.894,"p95_frame_time_ms":13.869},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":98,"repeats":3,"run_id":"138","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":49.446,"jank_rate":33.414,"memory_mb":281.084,"p95_frame_time_ms":25.72},"noise":{"fps":0.632,"jank_rate":0.449,"memory_mb":3.464,"p95_frame_time_ms":0.359},"pr":98,"repeats":3,"run_id":"138","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"bbc55c3","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":58.502,"jank_rate":6.141,"memory_mb":239.157,"p95_frame_time_ms":21.54},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":98,"repeats":3,"run_id":"138","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-05T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.355,"jank_rate":3.78,"memory_mb":118.296,"p95_frame_time_ms":18.991,"startup_ms":827.461},"noise":{"fps":0.746,"jank_rate":0.098,"memory_mb":1.466,"p95_frame_time_ms":0.278,"startup_ms":9.89},"pr":99,"repeats":3,"run_id":"139","scenario":"app_startup","schema":1,"status":"pass","timestamp":"2026-09-06T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":59.325,"jank_rate":0.398,"memory_mb":120.217,"p95_frame_time_ms":9.601},"noise":{"fps":0.77,"jank_rate":0.055,"memory_mb":1.49,"p95_frame_time_ms":0.164},"pr":99,"repeats":3,"run_id":"139","scenario":"login","schema":1,"status":"pass","timestamp":"2026-09-06T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.855,"jank_rate":0.919,"memory_mb":156.216,"p95_frame_time_ms":11.824},"noise":{"fps":0.769,"jank_rate":0.06,"memory_mb":1.97,"p95_frame_time_ms":0.194},"pr":99,"repeats":3,"run_id":"139","scenario":"home_scroll","schema":1,"status":"pass","timestamp":"2026-09-06T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":60.255,"jank_rate":1.604,"memory_mb":173.721,"p95_frame_time_ms":14.201},"noise":{"fps":0.765,"jank_rate":0.068,"memory_mb":2.114,"p95_frame_time_ms":0.218},"pr":99,"repeats":3,"run_id":"139","scenario":"community_scroll","schema":1,"status":"pass","timestamp":"2026-09-06T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":["fps","jank_rate","p95_frame_time_ms","memory_mb"],"metrics":{"fps":48.019,"jank_rate":33.586,"memory_mb":282.54,"p95_frame_time_ms":26.175},"noise":{"fps":0.631,"jank_rate":0.457,"memory_mb":3.479,"p95_frame_time_ms":0.36},"pr":99,"repeats":3,"run_id":"139","scenario":"community_detail","schema":1,"status":"fail","timestamp":"2026-09-06T14:14:41+00:00"},{"branch":"main","commit":"24c1276","device_profile":"ci-emulator-api34","failed_metrics":[],"metrics":{"fps":56.158,"jank_rate":5.878,"memory_mb":245.636,"p95_frame_time_ms":21.753},"noise":{"fps":0.74,"jank_rate":0.122,"memory_mb":2.93,"p95_frame_time_ms":0.302},"pr":99,"repeats":3,"run_id":"139","scenario":"image_heavy_screen","schema":1,"status":"pass","timestamp":"2026-09-06T14:14:41+00:00"}]</script>
+<script id="seed-regressions" type="application/json">[{"baseline":59.8,"branch":"main","change_pct":-16.8,"commit":"65322a4","current":49.766,"metric":"fps","pr":94,"run_id":"134","scenario":"community_detail","schema":1,"significant":true,"threshold_pct":10,"timestamp":"2026-09-01T17:14:41+00:00"},{"baseline":1.2,"branch":"main","change_pct":2457.1,"commit":"65322a4","current":30.685,"metric":"jank_rate","pr":94,"run_id":"134","scenario":"community_detail","schema":1,"significant":true,"threshold_pct":10,"timestamp":"2026-09-01T17:14:41+00:00"},{"baseline":17.1,"branch":"main","change_pct":49.1,"commit":"65322a4","current":25.493,"metric":"p95_frame_time_ms","pr":94,"run_id":"134","scenario":"community_detail","schema":1,"significant":true,"threshold_pct":10,"timestamp":"2026-09-01T17:14:41+00:00"},{"baseline":183,"branch":"main","change_pct":54.5,"commit":"65322a4","current":282.732,"metric":"memory_mb","pr":94,"run_id":"134","scenario":"community_detail","schema":1,"significant":true,"threshold_pct":10,"timestamp":"2026-09-01T17:14:41+00:00"}]</script>
+<script id="seed-baseline" type="application/json">{"schema":1,"updated_at":"2026-07-29T13:14:41+00:00","commit":"52e6b43","device_profile":"ci-emulator-api34","repeats":3,"scenarios":{"app_startup":{"metrics":{"fps":{"value":57.815,"noise":0.746},"jank_rate":{"value":4.019,"noise":0.098},"memory_mb":{"value":117.412,"noise":1.466},"p95_frame_time_ms":{"value":19.054,"noise":0.278},"startup_ms":{"value":801.18,"noise":9.89}}},"login":{"metrics":{"fps":{"value":59.161,"noise":0.77},"jank_rate":{"value":0.405,"noise":0.055},"memory_mb":{"value":119.037,"noise":1.49},"p95_frame_time_ms":{"value":9.568,"noise":0.164}}},"home_scroll":{"metrics":{"fps":{"value":60.181,"noise":0.769},"jank_rate":{"value":0.78,"noise":0.06},"memory_mb":{"value":155.617,"noise":1.97},"p95_frame_time_ms":{"value":11.979,"noise":0.194}}},"community_scroll":{"metrics":{"fps":{"value":58.857,"noise":0.765},"jank_rate":{"value":1.439,"noise":0.068},"memory_mb":{"value":174.596,"noise":2.114},"p95_frame_time_ms":{"value":13.789,"noise":0.218}}},"community_detail":{"metrics":{"fps":{"value":60.186,"noise":0.768},"jank_rate":{"value":1.243,"noise":0.064},"memory_mb":{"value":181.875,"noise":2.246},"p95_frame_time_ms":{"value":17.155,"noise":0.255}}},"image_heavy_screen":{"metrics":{"fps":{"value":57.362,"noise":0.74},"jank_rate":{"value":5.867,"noise":0.122},"memory_mb":{"value":236.611,"noise":2.93},"p95_frame_time_ms":{"value":21.183,"noise":0.302}}}}}</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var METRICS = [
+    { key: "fps", label: "FPS", unit: "", higher: true,
+      hint: "traced action 구간의 프레임 처리율. 낮아지면 회귀." },
+    { key: "jank_rate", label: "Jank Rate", unit: "%", higher: false,
+      hint: "프레임 예산(16.7ms)을 넘긴 프레임 비율." },
+    { key: "p95_frame_time_ms", label: "P95 Frame Time", unit: "ms", higher: false,
+      hint: "느린 5% 프레임의 경계. 체감 끊김에 가장 가깝다." },
+    { key: "p99_frame_time_ms", label: "P99 Frame Time", unit: "ms", higher: false,
+      hint: "최악 구간. 표본이 적으면 크게 흔들린다." },
+    { key: "memory_mb", label: "Memory (RSS)", unit: "MB", higher: false,
+      hint: "앱 프로세스 RSS. 시나리오 종료 시점." },
+    { key: "startup_ms", label: "Startup", unit: "ms", higher: false,
+      hint: "main() → 첫 프레임. app_startup 시나리오에서만 측정." }
+  ];
+  var SERIES_VARS = ["--s1", "--s2", "--s3", "--s4", "--s5", "--s6"];
+  var RANGES = [
+    { key: 7, label: "7일" }, { key: 30, label: "30일" },
+    { key: 90, label: "90일" }, { key: 0, label: "전체" }
+  ];
+
+  var el = function (id) { return document.getElementById(id); };
+  var css = function (name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  };
+  var fmt = function (v, unit) {
+    if (v === null || v === undefined) return "—";
+    var s = Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+    return s + unit;
+  };
+  var pct = function (cur, base) {
+    if (base === null || base === undefined || !base || cur === null || cur === undefined) return null;
+    return (cur - base) / base * 100;
+  };
+  var text = function (tag, cls, content) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (content !== undefined) n.textContent = content;
+    return n;
+  };
+
+  var state = {
+    history: [], regressions: [], baseline: null,
+    range: 30, scenarios: [], active: {}, selected: null, charts: []
+  };
+
+  // ---------------------------------------------------------------- 데이터
+  function parseJsonl(t) {
+    return t.split("\n").filter(function (l) { return l.trim(); })
+      .map(function (l) { try { return JSON.parse(l); } catch (e) { return null; } })
+      .filter(Boolean);
+  }
+  function seed(id) {
+    try { return JSON.parse(document.getElementById(id).textContent); } catch (e) { return null; }
+  }
+  function load(path, id, isJsonl) {
+    // 정적 호스팅에서는 fetch 가 성공한다. 파일을 직접 열었거나 샌드박스면
+    // 인라인 시드(데모 데이터)로 떨어진다.
+    return fetch(path, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw 0; return r.text(); })
+      .then(function (t) { return isJsonl ? parseJsonl(t) : JSON.parse(t); })
+      .catch(function () { return seed(id); });
+  }
+
+  Promise.all([
+    load("./history.jsonl", "seed-history", true),
+    load("./regressions.jsonl", "seed-regressions", true),
+    load("./baseline.json", "seed-baseline", false)
+  ]).then(function (r) {
+    state.history = (r[0] || []).slice().sort(function (a, b) {
+      return String(a.timestamp).localeCompare(String(b.timestamp));
+    });
+    state.regressions = r[1] || [];
+    state.baseline = r[2] || null;
+    if (!state.history.length) {
+      el("source-note").textContent = "기록된 CI run 이 없습니다.";
+      return;
+    }
+    state.scenarios = [];
+    state.history.forEach(function (h) {
+      if (state.scenarios.indexOf(h.scenario) < 0) state.scenarios.push(h.scenario);
+    });
+    state.scenarios.forEach(function (s) { state.active[s] = true; });
+    buildFilters();
+    render();
+  });
+
+  // ---------------------------------------------------------------- 필터
+  function buildFilters() {
+    var seg = el("range");
+    RANGES.forEach(function (r) {
+      var b = text("button", null, r.label);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(r.key === state.range));
+      b.onclick = function () {
+        state.range = r.key;
+        [].forEach.call(seg.children, function (c) {
+          c.setAttribute("aria-pressed", String(c === b));
+        });
+        render();
+      };
+      seg.appendChild(b);
+    });
+
+    var host = el("scenarios");
+    state.scenarios.forEach(function (name, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.style.color = "var(" + SERIES_VARS[i % SERIES_VARS.length] + ")";
+      b.setAttribute("aria-pressed", "true");
+      b.appendChild(text("span", "dot"));
+      b.appendChild(text("span", "name", name));
+      b.onclick = function () {
+        var on = b.getAttribute("aria-pressed") === "true";
+        // 마지막 하나까지 끄면 빈 화면이 된다. 그때는 그것만 남긴다.
+        var count = state.scenarios.filter(function (s) { return state.active[s]; }).length;
+        if (on && count === 1) return;
+        state.active[name] = !on;
+        b.setAttribute("aria-pressed", String(!on));
+        render();
+      };
+      host.appendChild(b);
+    });
+  }
+
+  function inRange(rows) {
+    if (!state.range) return rows;
+    var last = new Date(rows[rows.length - 1].timestamp).getTime();
+    var from = last - state.range * 864e5;
+    return rows.filter(function (r) { return new Date(r.timestamp).getTime() >= from; });
+  }
+
+  function color(scenario) {
+    return css(SERIES_VARS[state.scenarios.indexOf(scenario) % SERIES_VARS.length]);
+  }
+  function baselineOf(scenario, metric) {
+    var s = state.baseline && state.baseline.scenarios && state.baseline.scenarios[scenario];
+    return s && s.metrics && s.metrics[metric] ? s.metrics[metric].value : null;
+  }
+
+  // ---------------------------------------------------------------- 렌더
+  function render() {
+    var rows = inRange(state.history);
+    var runs = [];                       // run_id 순서 (x축)
+    var byRun = {};
+    rows.forEach(function (r) {
+      var k = r.run_id + "|" + r.commit;
+      if (!byRun[k]) { byRun[k] = { key: k, run: r, rows: {} }; runs.push(byRun[k]); }
+      byRun[k].rows[r.scenario] = r;
+    });
+    var shown = state.scenarios.filter(function (s) { return state.active[s]; });
+
+    el("source-note").textContent =
+      runs.length + "개 CI run · " + state.scenarios.length + "개 시나리오";
+    var lastRun = runs[runs.length - 1].run;
+    el("last-run").textContent =
+      "최근 " + new Date(lastRun.timestamp).toISOString().slice(0, 16).replace("T", " ") +
+      " · " + String(lastRun.commit).slice(0, 7);
+    el("trend-scope").textContent = shown.length === state.scenarios.length
+      ? "" : "(" + shown.join(", ") + ")";
+
+    renderTiles(runs, shown);
+    renderCharts(runs, shown);
+    select(state.selected && byRun[state.selected] ? state.selected : runs[runs.length - 1].key, byRun);
+    renderRegressions(rows);
+    renderTable(runs[runs.length - 1]);
+  }
+
+  function renderTiles(runs, shown) {
+    var host = el("tiles");
+    host.textContent = "";
+    shown.forEach(function (name) {
+      var series = runs.map(function (r) { return r.rows[name]; }).filter(Boolean);
+      if (!series.length) return;
+      var latest = series[series.length - 1];
+      var tile = text("div", "tile" + (latest.status === "fail" ? " is-fail" : ""));
+      tile.style.setProperty("--tile-accent", latest.status === "fail" ? "var(--bad)" : color(name));
+
+      var head = text("div", "tile-head");
+      head.appendChild(text("span", "name", name));
+      var pill = text("span", "pill " + (latest.status === "fail" ? "bad" : "ok"),
+        latest.status === "fail" ? "✕ REGRESSION" : "✓ PASS");
+      head.appendChild(pill);
+      tile.appendChild(head);
+
+      tile.appendChild(sparkline(series.map(function (s) { return s.metrics.fps; }), color(name)));
+
+      var rowsEl = text("div", "rows");
+      ["fps", "jank_rate", "p95_frame_time_ms", "memory_mb"].forEach(function (key) {
+        var m = METRICS.filter(function (x) { return x.key === key; })[0];
+        var cur = latest.metrics[key];
+        if (cur === undefined) return;
+        var base = baselineOf(name, key);
+        if (base === null) base = series[0].metrics[key];
+        var change = pct(cur, base);
+        var row = text("div", "row");
+        row.appendChild(text("span", "k", m.label));
+        row.appendChild(text("span", "v", fmt(cur, m.unit)));
+        var worse = change !== null && (m.higher ? change < -1 : change > 1);
+        var better = change !== null && (m.higher ? change > 1 : change < -1);
+        var cls = change === null ? "flat" : worse ? "up-bad" : better ? "good" : "flat";
+        var arrow = change === null ? "" : change > 1 ? " ↑" : change < -1 ? " ↓" : "";
+        row.appendChild(text("span", "d " + cls,
+          change === null ? "—" : (change > 0 ? "+" : "") + change.toFixed(1) + "%" + arrow));
+        rowsEl.appendChild(row);
+      });
+      tile.appendChild(rowsEl);
+      host.appendChild(tile);
+    });
+  }
+
+  function sparkline(values, stroke) {
+    var vals = values.filter(function (v) { return typeof v === "number"; });
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "spark");
+    svg.setAttribute("viewBox", "0 0 100 30");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    if (vals.length < 2) return svg;
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    var pad = (max - min) * 0.15 || 1;
+    var y = function (v) { return 28 - (v - min + pad) / (max - min + pad * 2) * 26; };
+    var d = vals.map(function (v, i) {
+      return (i ? "L" : "M") + (i / (vals.length - 1) * 100).toFixed(2) + " " + y(v).toFixed(2);
+    }).join(" ");
+    var path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", stroke);
+    path.setAttribute("stroke-width", "1.6");
+    path.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.appendChild(path);
+    var dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", "99.2");
+    dot.setAttribute("cy", y(vals[vals.length - 1]).toFixed(2));
+    dot.setAttribute("r", "1.8");
+    dot.setAttribute("fill", stroke);
+    svg.appendChild(dot);
+    return svg;
+  }
+
+  // 크로스헤어: Chart.js 기본에는 없어서 얇은 플러그인 하나로 추가한다.
+  var crosshair = {
+    id: "crosshair",
+    afterDatasetsDraw: function (chart) {
+      var pts = chart.tooltip && chart.tooltip.getActiveElements();
+      if (!pts || !pts.length) return;
+      var x = pts[0].element.x, area = chart.chartArea, ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = css("--axis");
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  function renderCharts(runs, shown) {
+    var host = el("charts");
+    state.charts.forEach(function (c) { c.destroy(); });
+    state.charts = [];
+    host.textContent = "";
+
+    var labels = runs.map(function (r) { return "#" + r.run.run_id; });
+    var single = shown.length === 1;
+
+    METRICS.forEach(function (m) {
+      var datasets = shown.map(function (name) {
+        var data = runs.map(function (r) {
+          var row = r.rows[name];
+          return row && row.metrics[m.key] !== undefined ? row.metrics[m.key] : null;
+        });
+        if (data.every(function (v) { return v === null; })) return null;
+        var c = color(name);
+        return {
+          label: name,
+          data: data,
+          borderColor: c,
+          backgroundColor: c,
+          borderWidth: 2,
+          tension: .25,
+          spanGaps: true,
+          pointRadius: runs.map(function (r) {
+            var row = r.rows[name];
+            return row && (row.failed_metrics || []).indexOf(m.key) >= 0 ? 4.5 : 0;
+          }),
+          pointHoverRadius: 5,
+          pointBackgroundColor: runs.map(function () { return css("--bad"); }),
+          pointBorderColor: runs.map(function () { return css("--surface"); }),
+          pointBorderWidth: 2,
+          pointHitRadius: 14
+        };
+      }).filter(Boolean);
+      if (!datasets.length) return;
+
+      // 시나리오를 하나만 고르면 baseline 을 점선 기준선으로 겹쳐 보여준다.
+      if (single && baselineOf(shown[0], m.key) !== null) {
+        var b = baselineOf(shown[0], m.key);
+        datasets.push({
+          label: "baseline",
+          data: labels.map(function () { return b; }),
+          borderColor: css("--muted"),
+          borderWidth: 1,
+          borderDash: [5, 4],
+          pointRadius: 0,
+          pointHitRadius: 0,
+          tension: 0
+        });
+      }
+
+      var card = text("div", "card");
+      var h = text("h2", null, m.label);
+      if (m.unit) { var u = text("span", "unit", "  " + m.unit); h.appendChild(u); }
+      card.appendChild(h);
+      card.appendChild(text("p", "hint", m.hint));
+      var plot = text("div", "plot");
+      var canvas = document.createElement("canvas");
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", m.label + " 추세 — " + shown.join(", "));
+      plot.appendChild(canvas);
+      card.appendChild(plot);
+      host.appendChild(card);
+
+      state.charts.push(new Chart(canvas, {
+        type: "line",
+        data: { labels: labels, datasets: datasets },
+        plugins: [crosshair],
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          onClick: function (e, els, chart) {
+            var idx = els && els.length ? els[0].index : -1;
+            if (idx < 0) {
+              var pts = chart.getElementsAtEventForMode(
+                e.native || e, "index", { intersect: false }, true);
+              if (pts.length) idx = pts[0].index;
+            }
+            if (idx >= 0 && runs[idx]) select(runs[idx].key, null);
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              border: { color: css("--axis") },
+              ticks: {
+                color: css("--muted"), maxRotation: 0, autoSkipPadding: 24,
+                font: { family: "IBM Plex Mono, monospace", size: 11 }
+              }
+            },
+            y: {
+              grid: { color: css("--grid"), drawTicks: false },
+              border: { display: false },
+              ticks: { color: css("--muted"), font: { size: 11 }, padding: 8, maxTicksLimit: 5 }
+            }
+          },
+          plugins: {
+            legend: {
+              display: datasets.length > 1,
+              position: "bottom",
+              labels: {
+                color: css("--ink-2"), boxWidth: 18, boxHeight: 2, usePointStyle: false,
+                padding: 12, font: { size: 11 }
+              }
+            },
+            tooltip: {
+              backgroundColor: css("--surface"),
+              titleColor: css("--muted"),
+              bodyColor: css("--ink"),
+              borderColor: css("--border"),
+              borderWidth: 1,
+              padding: 10,
+              usePointStyle: true,
+              boxWidth: 14, boxHeight: 2,
+              callbacks: {
+                title: function (items) {
+                  var r = runs[items[0].dataIndex].run;
+                  return "run #" + r.run_id + " · " + String(r.commit).slice(0, 7) +
+                    " · " + String(r.timestamp).slice(0, 10);
+                },
+                label: function (ctx) {
+                  return "  " + fmt(ctx.parsed.y, m.unit) + "   " + ctx.dataset.label;
+                }
+              }
+            }
+          }
+        }
+      }));
+    });
+  }
+
+  function select(key, byRunMaybe) {
+    state.selected = key;
+    var byRun = byRunMaybe;
+    if (!byRun) {
+      byRun = {};
+      inRange(state.history).forEach(function (r) {
+        var k = r.run_id + "|" + r.commit;
+        if (!byRun[k]) byRun[k] = { key: k, run: r, rows: {} };
+        byRun[k].rows[r.scenario] = r;
+      });
+    }
+    var entry = byRun[key];
+    var host = el("run-detail");
+    host.textContent = "";
+    if (!entry) { host.appendChild(text("div", "empty", "run 을 선택하세요.")); return; }
+
+    var r = entry.run;
+    // repo 를 아는 경우에만 GitHub 로 연결한다. 없으면 그냥 텍스트.
+    var link = function (path) { return r.repo ? r.repo + path : null; };
+    var meta = text("div", "meta");
+    [["run", "#" + r.run_id, link("/actions/runs/" + r.run_id)],
+     ["commit", String(r.commit).slice(0, 7), link("/commit/" + r.commit)],
+     ["PR", r.pr ? "#" + r.pr : "—", r.pr ? link("/pull/" + r.pr) : null],
+     ["branch", r.branch || "—", null],
+     ["측정 시각", String(r.timestamp).replace("T", " ").slice(0, 16), null],
+     ["반복", (r.repeats || "?") + "회", null],
+     ["러너", r.device_profile || "—", null]
+    ].forEach(function (kv) {
+      var d = text("div", "kv");
+      d.appendChild(text("span", "k", kv[0]));
+      if (kv[2]) {
+        var a = text("a", "mono", kv[1]);
+        a.href = kv[2];
+        a.target = "_blank";
+        a.rel = "noopener";
+        d.appendChild(a);
+      } else {
+        d.appendChild(text("b", "mono", kv[1]));
+      }
+      meta.appendChild(d);
+    });
+    host.appendChild(meta);
+
+    var table = document.createElement("table");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    ["Scenario"].concat(METRICS.map(function (m) { return m.label; })).forEach(function (h, i) {
+      var th = text("th", i ? "num" : null, h);
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    state.scenarios.filter(function (s) { return state.active[s]; }).forEach(function (name) {
+      var row = entry.rows[name];
+      var tr = document.createElement("tr");
+      var td0 = text("td", null, name);
+      tr.appendChild(td0);
+      METRICS.forEach(function (m) {
+        var cur = row && row.metrics[m.key];
+        var base = baselineOf(name, m.key);
+        var change = pct(cur, base);
+        var td = text("td", "num");
+        td.appendChild(text("span", null, fmt(cur === undefined ? null : cur, m.unit)));
+        if (change !== null && Math.abs(change) >= 1) {
+          var worse = m.higher ? change < 0 : change > 0;
+          var s = text("span", worse ? "d up-bad" : "d good",
+            "  " + (change > 0 ? "+" : "") + change.toFixed(1) + "%");
+          s.style.fontSize = "11px";
+          td.appendChild(s);
+        }
+        tr.appendChild(td);
+      });
+      if (row && row.status === "fail") tr.style.background = "var(--shade)";
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    var scroll = text("div", "scroll");
+    scroll.appendChild(table);
+    host.appendChild(scroll);
+
+    var foot = text("p", "sub");
+    foot.style.margin = "0";
+    foot.appendChild(document.createTextNode("% 는 baseline 대비 변화입니다"));
+    if (state.baseline && state.baseline.commit) {
+      foot.appendChild(document.createTextNode(" (baseline "));
+      var b = text("span", "mono", String(state.baseline.commit).slice(0, 7));
+      foot.appendChild(b);
+      foot.appendChild(document.createTextNode(", " + String(state.baseline.updated_at).slice(0, 10) + ")"));
+    }
+    foot.appendChild(document.createTextNode("."));
+    host.appendChild(foot);
+  }
+
+  function renderRegressions(rows) {
+    var from = rows.length ? new Date(rows[0].timestamp).getTime() : 0;
+    var list = state.regressions.filter(function (r) {
+      return new Date(r.timestamp).getTime() >= from &&
+        (state.active[r.scenario] !== false);
+    }).sort(function (a, b) { return String(b.timestamp).localeCompare(String(a.timestamp)); });
+
+    var tbody = el("reg-table").querySelector("tbody");
+    tbody.textContent = "";
+    el("reg-empty").hidden = list.length > 0;
+    el("reg-table").hidden = list.length === 0;
+
+    list.forEach(function (r) {
+      var m = METRICS.filter(function (x) { return x.key === r.metric; })[0] ||
+        { label: r.metric, unit: "" };
+      var tr = document.createElement("tr");
+      tr.appendChild(text("td", "mono", String(r.timestamp).slice(0, 10)));
+      tr.appendChild(text("td", null, r.scenario));
+      tr.appendChild(text("td", null, m.label));
+      tr.appendChild(text("td", "num", fmt(r.baseline, m.unit)));
+      tr.appendChild(text("td", "num", fmt(r.current, m.unit)));
+      var d = text("td", "num");
+      var span = text("span", "d up-bad",
+        (r.change_pct > 0 ? "+" : "") + Number(r.change_pct).toFixed(1) + "%");
+      d.appendChild(span);
+      tr.appendChild(d);
+      var td = text("td", "mono");
+      var label = String(r.commit).slice(0, 7) + (r.pr ? " · PR #" + r.pr : "");
+      if (r.repo) {
+        var a = text("a", null, label);
+        a.href = r.repo + (r.pr ? "/pull/" + r.pr : "/commit/" + r.commit);
+        a.target = "_blank";
+        a.rel = "noopener";
+        td.appendChild(a);
+      } else {
+        td.appendChild(text("span", null, label));
+      }
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderTable(entry) {
+    var t = el("table-view");
+    t.querySelector("thead").textContent = "";
+    t.querySelector("tbody").textContent = "";
+    var hr = document.createElement("tr");
+    ["Scenario"].concat(METRICS.map(function (m) {
+      return m.label + (m.unit ? " (" + m.unit + ")" : "");
+    })).forEach(function (h, i) { hr.appendChild(text("th", i ? "num" : null, h)); });
+    t.querySelector("thead").appendChild(hr);
+    state.scenarios.forEach(function (name) {
+      var row = entry.rows[name];
+      var tr = document.createElement("tr");
+      tr.appendChild(text("td", null, name));
+      METRICS.forEach(function (m) {
+        var v = row && row.metrics[m.key];
+        tr.appendChild(text("td", "num", fmt(v === undefined ? null : v, "")));
+      });
+      t.querySelector("tbody").appendChild(tr);
+    });
+  }
+
+  // 테마가 바뀌면 차트 색(축·격자·툴팁)도 따라가야 한다.
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      if (state.history.length) render();
+    });
+  }
+})();
+</script>
