@@ -147,7 +147,6 @@ def cmd_check(a) -> int:
     )
     Path(a.out).write_text(md, encoding="utf-8")
     Path(a.rows_out).write_text(json.dumps(rows, indent=2), encoding="utf-8")
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(md)
 
     # 시나리오가 통째로 비어 있으면 "성능 회귀"가 아니라 "측정 실패"다. 조용히
@@ -292,6 +291,11 @@ def cmd_seed_demo(a) -> int:
 
 
 def main(argv=None) -> int:
+    # Windows 콘솔은 기본적으로 시스템 코드페이지(cp949 등)를 쓴다 — 리포트의
+    # 화살표/이모지가 출력마다 들쭉날쭉 깨지는 걸 막으려고 전체 stdout/stderr 를
+    # UTF-8 로 통일한다.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(prog="perfkit", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", default=str(ROOT / "perf.yaml"))

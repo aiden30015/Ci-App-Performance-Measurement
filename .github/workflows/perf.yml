@@ -152,7 +152,16 @@ jobs:
 
   deploy-dashboard:
     needs: perf
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # perf 잡은 회귀가 감지되면 마지막 스텝에서 의도적으로 exit 1 해서 CI 를 빨갛게
+    # 만든다 (그래야 알림이 간다). 그 실패 때문에 기본 success() 게이트에 걸려
+    # deploy-dashboard 가 스킵되면, 대시보드를 가장 갱신해야 할 순간(방금 회귀가
+    # 난 시점)에 정작 갱신이 안 된다. perf.outputs.regressed 로 "회귀로 인한 실패"만
+    # 구분해서 그 경우엔 계속 배포한다.
+    if: >
+      always() &&
+      needs.perf.result != 'cancelled' &&
+      (needs.perf.result == 'success' || needs.perf.outputs.regressed == 'true') &&
+      github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       pages: write

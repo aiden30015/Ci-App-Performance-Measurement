@@ -3,7 +3,6 @@ from __future__ import annotations
 
 _ICON = {"fail": "❌", "improved": "🚀", "noisy": "🟡", "pass": "✅",
          "new": "🆕", "gone": "⚠️"}
-_LABEL = {"ko": "성능", "en": "Performance"}
 
 
 def _num(v, unit: str) -> str:
