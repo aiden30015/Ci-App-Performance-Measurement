@@ -125,12 +125,17 @@ def cmd_check(a) -> int:
             "`perfkit rebaseline` 로 기준을 만드세요."
         )
         base = {"scenarios": {}}
+    elif base.get("device_profile") != cfg.get("device_profile"):
+        # DESIGN §6.1: 다른 하드웨어의 절대값 비교는 무의미하다. 경고만 남기고
+        # 조용히 비교를 강행하면(이전 동작) 에뮬레이터 vs 로컬 데스크톱처럼 하드웨어가
+        # 다를 때 "회귀"가 실제로는 하드웨어 차이일 뿐인데도 CI 를 fail 시킨다.
+        warnings.append(
+            f"device_profile 불일치 (baseline `{base.get('device_profile')}` vs "
+            f"현재 `{cfg.get('device_profile')}`) — 다른 하드웨어라 비교할 수 없습니다. "
+            "이번 결과는 회귀 판정 없이 기록만 합니다. `perfkit rebaseline` 로 이 러너 기준을 새로 만드세요."
+        )
+        base = {**base, "scenarios": {}}
     else:
-        if base.get("device_profile") != cfg.get("device_profile"):
-            warnings.append(
-                f"device_profile 불일치 (baseline `{base.get('device_profile')}` vs "
-                f"현재 `{cfg.get('device_profile')}`) — 비교 결과를 신뢰하지 마세요."
-            )
         if B.is_stale(base, int(cfg.get("baseline_max_age_days", 30))):
             warnings.append(f"baseline 이 {cfg.get('baseline_max_age_days', 30)}일보다 "
                             "오래됐습니다. rebaseline 을 검토하세요.")
