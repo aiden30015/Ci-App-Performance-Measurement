@@ -63,10 +63,13 @@ jobs:
           arch: x86_64
           target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          # reactivecircus/android-emulator-runner 는 script 의 각 줄을 별도 `sh -c` 로
+          # 실행한다 (한 프로세스에서 이어지는 스크립트가 아님) — 그래서 줄 끝 `\` 로
+          # 이어붙이면 다음 줄과 합쳐지지 않고 `\` 가 그대로 별도 인자로 파이썬에 전달돼
+          # `unrecognized arguments: \` 로 매번 터진다. 반드시 한 줄로 써야 한다.
           script: |
             export PERF_DEVICE=$(adb devices | awk 'NR==2{print $1}')
-            PYTHONPATH=tool python -m perfkit run --out runs \
-              ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }}
+            PYTHONPATH=tool python -m perfkit run --out runs ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }}
 
       - name: Aggregate
         run: PYTHONPATH=tool python -m perfkit aggregate --runs runs --out current.json
