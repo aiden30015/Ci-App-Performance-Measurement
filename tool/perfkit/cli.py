@@ -86,7 +86,12 @@ def cmd_run(a) -> int:
         out.mkdir(parents=True)
         if "app_startup" in (cfg.get("scenarios") or []):
             _trace_startup(flutter, a, out)
-        cmd = [flutter, "drive", "--profile",
+        # --no-dds: DDS(Dart Development Service)가 켜져 있으면
+        # IntegrationTestWidgetsFlutterBinding.traceAction() 이 여는 VM Service
+        # WebSocket 이 "Connection refused" 로 매번 죽는다(Flutter 알려진 동작 —
+        # 에러 메시지 자체가 --no-dds 를 권장한다). app_startup 을 뺀 모든
+        # 시나리오가 이 때문에 결과를 못 내고 있었다.
+        cmd = [flutter, "drive", "--profile", "--no-dds",
                "--driver=test_driver/perf_driver.dart",
                "--target=integration_test/perf_test.dart"]
         if a.device:
