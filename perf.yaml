@@ -38,4 +38,4 @@ headline_metrics: [fps, jank_rate, p95_frame_time_ms, memory_mb, startup_ms]
 # baseline 이 이보다 오래되면 리포트에 경고를 띄운다.
 baseline_max_age_days: 30
 
-dashboard_url: ""  # GitHub Pages 배포 후 URL 을 넣으면 PR 코멘트에 링크가 붙는다
+dashboard_url: "https://aiden30015.github.io/Ci-App-Performance-Measurement/"
