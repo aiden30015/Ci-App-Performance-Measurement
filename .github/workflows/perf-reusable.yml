@@ -23,6 +23,14 @@ on:
         description: '반복 측정 횟수 (기본값은 호출한 repo 의 perf.yaml)'
         type: string
         default: ''
+      history-refs:
+        description: >-
+          push 이벤트에서 perf-history 를 쌓고 대시보드를 갱신할 브랜치 목록
+          (JSON 배열 문자열, 예: '["main","develop"]'). 여기 없는 브랜치로
+          push 돼도 PR 게이트(회귀 검사)는 그대로 동작하고, 히스토리 적재·
+          대시보드 갱신만 건너뛴다.
+        type: string
+        default: '["main"]'
     secrets:
       env_file:
         description: >-
@@ -149,9 +157,10 @@ jobs:
             perf_report.md
           retention-days: 30
 
-      # ---- main 에 머지된 결과만 장기 히스토리에 쌓는다 (PR 측정값은 브랜치 상태라 추세를 오염시킨다).
+      # ---- history-refs 에 오른 브랜치에 머지된 결과만 장기 히스토리에 쌓는다
+      # (그 외 브랜치/PR 측정값은 상태가 불안정해 추세를 오염시킨다).
       - name: Append history
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: contains(fromJSON(inputs.history-refs), github.ref_name) && github.event_name == 'push'
         run: |
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -160,15 +169,15 @@ jobs:
             || git worktree add --orphan -b perf-history ../history
           PYTHONPATH=_perfkit/tool python -m perfkit store \
             --current current.json --rows perf_rows.json --out ../history \
-            --commit "${{ github.sha }}" --branch main --run-id "${{ github.run_id }}"
+            --commit "${{ github.sha }}" --branch "${{ github.ref_name }}" --run-id "${{ github.run_id }}"
           cd ../history
           git add -A && git commit -m "perf: run ${{ github.run_id }} (${{ github.sha }})" && git push origin perf-history
 
       - name: Build dashboard
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: contains(fromJSON(inputs.history-refs), github.ref_name) && github.event_name == 'push'
         run: PYTHONPATH=_perfkit/tool python -m perfkit dashboard --data ../history --out site
       - uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: contains(fromJSON(inputs.history-refs), github.ref_name) && github.event_name == 'push'
         with:
           path: site
 
@@ -206,7 +215,7 @@ jobs:
       always() &&
       needs.perf.result != 'cancelled' &&
       (needs.perf.result == 'success' || needs.perf.outputs.regressed == 'true') &&
-      github.ref == 'refs/heads/main' && github.event_name == 'push'
+      contains(fromJSON(inputs.history-refs), github.ref_name) && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
