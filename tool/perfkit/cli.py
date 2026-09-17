@@ -91,8 +91,12 @@ def cmd_run(a) -> int:
         # WebSocket 이 "Connection refused" 로 매번 죽는다(Flutter 알려진 동작 —
         # 에러 메시지 자체가 --no-dds 를 권장한다). app_startup 을 뺀 모든
         # 시나리오가 이 때문에 결과를 못 내고 있었다.
+        # driver 는 ROOT(perfkit 자신의 위치) 기준 절대경로 — 다른 repo 가 이 도구를
+        # 재사용 workflow 로 불러 perfkit 을 서브디렉터리에 체크아웃해도 항상 찾는다.
+        # target 은 반대로 cwd(=호출한 앱 repo) 기준 상대경로여야 한다.
+        driver = str(ROOT / "test_driver" / "perf_driver.dart")
         cmd = [flutter, "drive", "--profile", "--no-dds",
-               "--driver=test_driver/perf_driver.dart",
+               f"--driver={driver}",
                "--target=integration_test/perf_test.dart"]
         if a.device:
             cmd += ["-d", a.device]
@@ -206,8 +210,11 @@ def cmd_store(a) -> int:
 def cmd_dashboard(a) -> int:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    # dashboard/index.html 은 perfkit 자체(ROOT)에서 온다. baseline 은 이 도구를
+    # 호출한 프로젝트(cwd)의 것 — 여러 repo 에서 이 workflow 를 재사용할 때
+    # perfkit 이 어디 체크아웃됐는지와 무관하게 baseline 은 항상 호출한 앱의 것이어야 한다.
     html = (ROOT / "dashboard" / "index.html").read_text(encoding="utf-8")
-    base_src = ROOT / "baseline" / "performance_baseline.json"
+    base_src = B.DEFAULT_PATH
 
     data = {"seed-history": [], "seed-regressions": [], "seed-baseline": None}
     for key, f in (("seed-history", store.HISTORY), ("seed-regressions", store.REGRESSIONS)):
@@ -308,7 +315,9 @@ def main(argv=None) -> int:
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(prog="perfkit", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--config", default=str(ROOT / "perf.yaml"))
+    # cwd 기준 — 다른 repo 가 이 workflow 를 재사용할 때 perfkit 이 어디 체크아웃됐든
+    # perf.yaml 은 항상 그 repo(cwd) 자신의 것을 읽어야 한다 (ROOT 를 쓰면 안 됨).
+    p.add_argument("--config", default="perf.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="flutter drive 를 N회 실행")

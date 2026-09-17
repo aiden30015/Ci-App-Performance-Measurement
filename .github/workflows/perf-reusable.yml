@@ -1,0 +1,194 @@
+name: perfkit (reusable)
+
+# 다른 repo 가 uses: aiden30015/Ci-App-Performance-Measurement/.github/workflows/perf-reusable.yml@main
+# 로 불러 쓰는 본체. 이 repo 자신도 perf.yml 에서 이걸 그대로 호출한다 (self-call) —
+# 그래서 이 repo 의 CI 가 계속 통과하는 것 자체가 "다른 repo 에서도 통할까"의 회귀 테스트다.
+#
+# 호출하는 repo 에 필요한 것: perf.yaml, integration_test/perf_test.dart,
+# lib/(앱 코드), baseline/performance_baseline.json(있으면). perfkit 도구·driver·
+# dashboard 는 여기서만 관리하고 _perfkit/ 로 체크아웃해서 쓴다 — 그래서 오늘 같은
+# 버그를 고치면 이 repo 하나만 고치면 이 workflow 를 쓰는 모든 repo 에 바로 반영된다.
+on:
+  workflow_call:
+    inputs:
+      perfkit-ref:
+        description: 'perfkit 자체(tool/driver/dashboard) 버전. 팀 프로젝트라면 main 대신 태그 고정을 권장'
+        type: string
+        default: main
+      rebaseline:
+        description: '현재 측정값으로 baseline 을 갱신하는 PR 생성'
+        type: boolean
+        default: false
+      repeats:
+        description: '반복 측정 횟수 (기본값은 호출한 repo 의 perf.yaml)'
+        type: string
+        default: ''
+    outputs:
+      regressed:
+        description: '이번 실행에서 회귀가 감지됐는지'
+        value: ${{ jobs.perf.outputs.regressed }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      regressed: ${{ steps.check.outcome == 'failure' }}
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      # 도구·driver·dashboard 는 항상 이 repo(perfkit) 에서 가져온다. 서브디렉터리로
+      # 체크아웃하므로 호출한 repo 의 파일과 절대 섞이지 않는다.
+      - name: Checkout perfkit
+        uses: actions/checkout@v4
+        with:
+          repository: aiden30015/Ci-App-Performance-Measurement
+          ref: ${{ inputs.perfkit-ref }}
+          path: _perfkit
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+
+      - run: flutter pub get
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # 측정. 러너 성능 편차를 줄이려고 같은 세션에서 N회 반복한다 (docs/DESIGN.md §6.2).
+      - name: Measure
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          # reactivecircus/android-emulator-runner 는 script 의 각 줄을 별도 `sh -c` 로
+          # 실행한다 — 줄 끝 `\` 로 이어붙이면 다음 줄과 합쳐지지 않고 `\` 가 그대로
+          # 별도 인자로 파이썬에 전달돼 매번 터진다. 반드시 한 줄로 써야 한다.
+          script: |
+            export PERF_DEVICE=$(adb devices | awk 'NR==2{print $1}')
+            PYTHONPATH=_perfkit/tool python -m perfkit run --out runs ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }}
+
+      - name: Aggregate
+        run: PYTHONPATH=_perfkit/tool python -m perfkit aggregate --runs runs --out current.json
+
+      - name: Check against baseline
+        id: check
+        continue-on-error: true
+        run: |
+          PYTHONPATH=_perfkit/tool python -m perfkit check \
+            --current current.json \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out perf_report.md --rows-out perf_rows.json
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat perf_report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body-file perf_report.md --edit-last --create-if-none
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-raw-${{ github.run_id }}
+          path: |
+            runs/
+            current.json
+            perf_rows.json
+            perf_report.md
+          retention-days: 30
+
+      # ---- main 에 머지된 결과만 장기 히스토리에 쌓는다 (PR 측정값은 브랜치 상태라 추세를 오염시킨다).
+      - name: Append history
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git fetch origin perf-history || true
+          git worktree add ../history perf-history 2>/dev/null \
+            || git worktree add --orphan -b perf-history ../history
+          PYTHONPATH=_perfkit/tool python -m perfkit store \
+            --current current.json --rows perf_rows.json --out ../history \
+            --commit "${{ github.sha }}" --branch main --run-id "${{ github.run_id }}"
+          cd ../history
+          git add -A && git commit -m "perf: run ${{ github.run_id }} (${{ github.sha }})" && git push origin perf-history
+
+      - name: Build dashboard
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: PYTHONPATH=_perfkit/tool python -m perfkit dashboard --data ../history --out site
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        with:
+          path: site
+
+      # ---- 수동 rebaseline: 자동 커밋하지 않고 리뷰 가능한 PR 로 만든다 (DESIGN §6.4).
+      - name: Rebaseline PR
+        if: inputs.rebaseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH=_perfkit/tool python -m perfkit rebaseline \
+            --current current.json --commit "${{ github.sha }}" | tee rebaseline.log
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          branch="perf/rebaseline-${{ github.run_id }}"
+          git checkout -b "$branch"
+          git add baseline/performance_baseline.json
+          git commit -m "perf: rebaseline from ${{ github.sha }}"
+          git push origin "$branch"
+          gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
+            --body "$(printf 'run %s 의 측정값으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
+                      "${{ github.run_id }}" "$(cat rebaseline.log)")"
+
+      - name: Fail on regression
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo '::error::성능 회귀가 감지되었습니다. Job Summary 의 리포트를 확인하세요.'
+          exit 1
+
+  deploy-dashboard:
+    needs: perf
+    # perf job 은 회귀가 감지되면 마지막 스텝에서 의도적으로 exit 1 해서 CI 를 빨갛게
+    # 만든다. 그 실패 때문에 기본 success() 게이트에 걸려 deploy-dashboard 가 스킵되면,
+    # 대시보드를 가장 갱신해야 할 순간(방금 회귀가 난 시점)에 정작 갱신이 안 된다.
+    if: >
+      always() &&
+      needs.perf.result != 'cancelled' &&
+      (needs.perf.result == 'success' || needs.perf.outputs.regressed == 'true') &&
+      github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
