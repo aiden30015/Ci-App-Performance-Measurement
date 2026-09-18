@@ -105,6 +105,13 @@ jobs:
           printf '%s\n' "$ENV_FILE" > assets/env/dev.env
           cp assets/env/dev.env assets/env/prod.env
 
+      # 진단용: 값은 절대 출력하지 않고, 어떤 키가 실제로 파일에 들어갔는지만
+      # (줄 수와 키 이름) 확인한다.
+      - name: Debug env file keys
+        run: |
+          echo "line count: $(wc -l < assets/env/dev.env)"
+          echo "keys: $(grep -o '^[A-Za-z_][A-Za-z0-9_]*=' assets/env/dev.env | tr -d '=' | tr '\n' ' ')"
+
       # 진단용: 이 러너에서 백엔드가 실제로 응답하는지 확인한다. URL 값 자체는
       # 출력하지 않는다(시크릿이라 어차피 마스킹되지만, 굳이 남길 필요도 없다).
       - name: Debug backend reachability
