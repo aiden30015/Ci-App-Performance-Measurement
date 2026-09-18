@@ -91,13 +91,18 @@ jobs:
       # 그 파일을 asset 으로 선언하고 있으면 없을 때 `flutter pub get`/build 자체가
       # 깨진다 — 그래서 pub get 보다 먼저 써야 한다. env_file 시크릿이 비어 있으면
       # (dotenv 를 안 쓰는 앱) 조용히 건너뛴다.
+      # `secrets` 컨텍스트는 `if:` 조건문에서 쓸 수 없다 (Unrecognized named-value:
+      # 'secrets') — job/step 의 `env:`, `with:`, `run:` 에서만 참조 가능하다.
+      # 그래서 스텝은 항상 실행하고, 비어있는지 판단은 셸 안에서 한다.
       - name: Create env asset files
-        if: ${{ secrets.env_file != '' }}
+        env:
+          ENV_FILE: ${{ secrets.env_file }}
         run: |
+          if [ -z "$ENV_FILE" ]; then
+            exit 0
+          fi
           mkdir -p assets/env
-          cat > assets/env/dev.env <<'PERFKIT_ENV_FILE_EOF'
-          ${{ secrets.env_file }}
-          PERFKIT_ENV_FILE_EOF
+          printf '%s\n' "$ENV_FILE" > assets/env/dev.env
           cp assets/env/dev.env assets/env/prod.env
 
       - run: flutter pub get
