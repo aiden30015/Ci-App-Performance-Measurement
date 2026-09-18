@@ -105,6 +105,18 @@ jobs:
           printf '%s\n' "$ENV_FILE" > assets/env/dev.env
           cp assets/env/dev.env assets/env/prod.env
 
+      # 진단용: 이 러너에서 백엔드가 실제로 응답하는지 확인한다. URL 값 자체는
+      # 출력하지 않는다(시크릿이라 어차피 마스킹되지만, 굳이 남길 필요도 없다).
+      - name: Debug backend reachability
+        run: |
+          BASE_URL=$(grep -m1 '^GOMS_API_BASE_URL=' assets/env/dev.env 2>/dev/null | cut -d= -f2-)
+          if [ -z "$BASE_URL" ]; then
+            echo "GOMS_API_BASE_URL not present in env file"
+            exit 0
+          fi
+          echo "Pinging backend (URL masked)..."
+          curl -sS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s (connect: %{time_connect}s)\n' --max-time 15 "$BASE_URL" || echo "curl exit code: $?"
+
       # 표준 Flutter 서명 관례(android/key.properties + android/app/build.gradle(.kts)
       # 의 keystoreProperties)를 쓰는 앱은, release build type 설정이 Gradle 설정
       # 단계에서 항상(요청한 variant 와 무관하게) 평가돼서 key.properties 가 없으면
