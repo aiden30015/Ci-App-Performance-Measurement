@@ -105,6 +105,28 @@ jobs:
           printf '%s\n' "$ENV_FILE" > assets/env/dev.env
           cp assets/env/dev.env assets/env/prod.env
 
+      # 표준 Flutter 서명 관례(android/key.properties + android/app/build.gradle(.kts)
+      # 의 keystoreProperties)를 쓰는 앱은, release build type 설정이 Gradle 설정
+      # 단계에서 항상(요청한 variant 와 무관하게) 평가돼서 key.properties 가 없으면
+      # `flutter drive --profile` 까지도 즉시 실패한다 — 실제 배포 키를 CI 에 둘 수는
+      # 없으니, 측정에만 쓰고 버릴 자체 서명 키스토어를 만들어 채워준다.
+      - name: Create throwaway keystore for profile build
+        run: |
+          if [ -f android/key.properties ]; then
+            exit 0
+          fi
+          keytool -genkeypair -v \
+            -keystore android/app/perfkit-throwaway.jks \
+            -storepass perfkit-throwaway -keypass perfkit-throwaway \
+            -alias perfkit -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=perfkit, OU=CI, O=CI, L=CI, S=CI, C=US"
+          cat > android/key.properties <<EOF
+          storePassword=perfkit-throwaway
+          keyPassword=perfkit-throwaway
+          keyAlias=perfkit
+          storeFile=perfkit-throwaway.jks
+          EOF
+
       - run: flutter pub get
 
       - name: Enable KVM
