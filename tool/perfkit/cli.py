@@ -1,5 +1,6 @@
 """performance-runner + 파이프라인 글루.
 
+  perfkit select       변경 파일 → 돌릴 시나리오 (perf.yaml 의 selection)
   perfkit run          시나리오를 N회 측정 → runs/run-<i>/<scenario>.json
   perfkit aggregate    runs/ → current.json
   perfkit check        current.json vs baseline → perf_report.md (+ exit 1)
@@ -22,6 +23,7 @@ import yaml
 
 from . import baseline as B
 from . import detect, metrics, report, store
+from . import select as S
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,6 +37,10 @@ def _run_dirs(runs: Path) -> list[Path]:
     if not dirs:
         raise SystemExit(f"no run directories under {runs}")
     return dirs
+
+
+def _csv(v: str | None) -> list[str]:
+    return [x.strip() for x in (v or "").split(",") if x.strip()]
 
 
 def _trace_startup(flutter: str, a, out: Path) -> None:
@@ -77,6 +83,8 @@ def cmd_run(a) -> int:
     cfg = load_config(a.config)
     flutter = shutil.which("flutter") or "flutter"
     repeats = a.repeats or int(cfg.get("repeats", 3))
+    only = _csv(a.scenarios)          # 비면 perf.yaml 의 전체
+    drive_only = [x for x in only if x != "app_startup"]
     for i in range(1, repeats + 1):
         out = Path(a.out) / f"run-{i}"
         # 이전 실행 결과를 남겨두면, 이번에 실패한 시나리오가 옛 값으로 조용히
@@ -84,8 +92,11 @@ def cmd_run(a) -> int:
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)
-        if "app_startup" in (cfg.get("scenarios") or []):
+        wanted = only or (cfg.get("scenarios") or [])
+        if "app_startup" in wanted:
             _trace_startup(flutter, a, out)
+        if only and not drive_only:
+            continue                  # app_startup 만 골랐으면 flutter drive 는 필요 없다
         # --no-dds: DDS(Dart Development Service)가 켜져 있으면
         # IntegrationTestWidgetsFlutterBinding.traceAction() 이 여는 VM Service
         # WebSocket 이 "Connection refused" 로 매번 죽는다(Flutter 알려진 동작 —
@@ -98,6 +109,8 @@ def cmd_run(a) -> int:
         cmd = [flutter, "drive", "--profile", "--no-dds",
                f"--driver={driver}",
                "--target=integration_test/perf_test.dart"]
+        if drive_only:
+            cmd.append(f"--dart-define=PERF_SCENARIOS={','.join(drive_only)}")
         if a.device:
             cmd += ["-d", a.device]
         print(f"[perfkit] run {i}/{repeats}: {' '.join(cmd)}", flush=True)
@@ -114,10 +127,32 @@ def cmd_run(a) -> int:
 # ---------------------------------------------------------------- aggregate
 def cmd_aggregate(a) -> int:
     cfg = load_config(a.config)
-    current = metrics.aggregate(_run_dirs(Path(a.runs)), cfg.get("scenarios"))
+    current = metrics.aggregate(_run_dirs(Path(a.runs)),
+                                _csv(a.scenarios) or cfg.get("scenarios"))
     Path(a.out).write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
     print(f"[perfkit] {a.out}: {len(current['scenarios'])} scenarios "
           f"× {current['repeats']} runs")
+    return 0
+
+
+# ------------------------------------------------------------------- select
+def cmd_select(a) -> int:
+    cfg = load_config(a.config)
+    if a.files_from:
+        changed = [l.strip() for l in Path(a.files_from).read_text(encoding="utf-8").splitlines()
+                   if l.strip()]
+    else:
+        changed = S.changed_files(a.base, a.head)
+    r = S.select(changed, cfg)
+    print(json.dumps({**r, "changed": len(changed)}, ensure_ascii=False, indent=2))
+    gh = os.environ.get("GITHUB_OUTPUT")
+    if gh:
+        # 전체를 돌릴 땐 빈 값(=perf.yaml 의 전체)으로 내보낸다.
+        full = r["scenarios"] == list(cfg.get("scenarios") or [])
+        with open(gh, "a", encoding="utf-8") as f:
+            f.write(f"scenarios={'' if full else ','.join(r['scenarios'])}\n")
+            f.write(f"skip={'true' if r['skip'] else 'false'}\n")
+            f.write(f"note={r['reason']}\n")
     return 0
 
 
@@ -149,7 +184,13 @@ def cmd_check(a) -> int:
             warnings.append(f"baseline 이 {cfg.get('baseline_max_age_days', 30)}일보다 "
                             "오래됐습니다. rebaseline 을 검토하세요.")
 
-    rows = detect.judge(B.compare(base, current, cfg.get("scenarios", [])), cfg)
+    only = _csv(a.scenarios)
+    notes = [a.note] if a.note else []
+    if only:
+        skipped = [x for x in cfg.get("scenarios", []) if x not in only]
+        notes.append(f"측정한 시나리오: {', '.join(f'`{x}`' for x in only)}"
+                     + (f" · 건너뜀: {', '.join(f'`{x}`' for x in skipped)}" if skipped else ""))
+    rows = detect.judge(B.compare(base, current, only or cfg.get("scenarios", [])), cfg)
     md = report.render(
         rows,
         headline=cfg.get("headline_metrics", list(metrics.METRICS)),
@@ -158,6 +199,7 @@ def cmd_check(a) -> int:
         dashboard_url=a.dashboard_url or cfg.get("dashboard_url", ""),
         baseline_info=base if base.get("scenarios") else None,
         warnings=warnings,
+        notes=notes,
     )
     Path(a.out).write_text(md, encoding="utf-8")
     Path(a.rows_out).write_text(json.dumps(rows, indent=2), encoding="utf-8")
@@ -320,17 +362,25 @@ def main(argv=None) -> int:
     p.add_argument("--config", default="perf.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    se = sub.add_parser("select", help="변경 파일로 돌릴 시나리오 고르기")
+    se.add_argument("--base", default="origin/main")
+    se.add_argument("--head", default="HEAD")
+    se.add_argument("--files-from", help="git diff 대신 파일 목록(줄 단위)을 읽는다")
+    se.set_defaults(fn=cmd_select)
+
     r = sub.add_parser("run", help="flutter drive 를 N회 실행")
     r.add_argument("--out", default="runs")
     r.add_argument("--app", default=".")
     r.add_argument("--device", default=os.environ.get("PERF_DEVICE"))
     r.add_argument("--repeats", type=int)
+    r.add_argument("--scenarios", default="", help="쉼표로 구분한 일부 시나리오만 (비면 전체)")
     r.add_argument("--strict", action="store_true", help="한 번이라도 실패하면 중단")
     r.set_defaults(fn=cmd_run)
 
     g = sub.add_parser("aggregate", help="반복 측정 집계")
     g.add_argument("--runs", default="runs")
     g.add_argument("--out", default="current.json")
+    g.add_argument("--scenarios", default="", help="일부 시나리오만 집계 (비면 전체)")
     g.set_defaults(fn=cmd_aggregate)
 
     c = sub.add_parser("check", help="baseline 비교 + 리포트 (회귀 시 exit 1)")
@@ -341,6 +391,8 @@ def main(argv=None) -> int:
     c.add_argument("--commit", default="")
     c.add_argument("--run-url", default="")
     c.add_argument("--dashboard-url", default="")
+    c.add_argument("--scenarios", default="", help="이 시나리오만 비교 (비면 전체)")
+    c.add_argument("--note", default="", help="리포트 상단에 붙일 안내 (예: 선택 사유)")
     c.set_defaults(fn=cmd_check)
 
     b = sub.add_parser("rebaseline", help="현재 결과를 새 baseline 으로")

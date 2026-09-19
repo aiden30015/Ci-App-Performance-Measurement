@@ -23,6 +23,20 @@ on:
         description: '반복 측정 횟수 (기본값은 호출한 repo 의 perf.yaml)'
         type: string
         default: ''
+      scenarios:
+        description: >-
+          쉼표로 구분한 시나리오만 측정 (예: 'home_scroll,login'). 비우면 아래
+          select-changed 규칙을 따르고, 그것도 아니면 perf.yaml 의 전체를 측정한다.
+          일부만 측정한 결과는 baseline 으로 쓸 수 없어 rebaseline 과 같이 못 쓴다.
+        type: string
+        default: ''
+      select-changed:
+        description: >-
+          true 면 pull_request 에서 변경된 파일로 돌릴 시나리오를 고른다
+          (perf.yaml 의 selection 참고). 성능과 무관한 변경뿐이면 측정을 건너뛴다.
+          push/수동 실행은 항상 전체(또는 scenarios 입력)를 측정한다.
+        type: boolean
+        default: false
       history-refs:
         description: >-
           push 이벤트에서 perf-history 를 쌓고 대시보드를 갱신할 브랜치 목록
@@ -56,7 +70,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 무엇을 잴지 정하는 가벼운 job. 에뮬레이터(12~15분)를 띄우기 전에 끝난다.
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      scenarios: ${{ steps.pick.outputs.scenarios }}
+      skip: ${{ steps.pick.outputs.skip }}
+      note: ${{ steps.pick.outputs.note }}
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Checkout perfkit
+        uses: actions/checkout@v4
+        with:
+          repository: aiden30015/Ci-App-Performance-Measurement
+          ref: ${{ inputs.perfkit-ref }}
+          path: _perfkit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      - id: pick
+        env:
+          MANUAL: ${{ inputs.scenarios }}
+          SELECT_CHANGED: ${{ inputs.select-changed }}
+          REBASELINE: ${{ inputs.rebaseline }}
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$MANUAL" ]; then
+            if [ "$REBASELINE" = "true" ]; then
+              echo "::error::일부 시나리오만 측정한 결과로는 baseline 을 갱신할 수 없습니다 (scenarios 를 비우세요)."
+              exit 1
+            fi
+            {
+              echo "scenarios=$MANUAL"
+              echo "skip=false"
+              echo "note=수동으로 지정한 시나리오만 측정"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$SELECT_CHANGED" = "true" ] && [ "$EVENT" = "pull_request" ]; then
+            PYTHONPATH=_perfkit/tool python -m perfkit select --base "$BASE_SHA" --head "$HEAD_SHA"
+          else
+            {
+              echo "scenarios="
+              echo "skip=false"
+              echo "note="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   perf:
+    needs: select
+    if: needs.select.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
@@ -138,6 +206,8 @@ jobs:
       # 측정. 러너 성능 편차를 줄이려고 같은 세션에서 N회 반복한다 (docs/DESIGN.md §6.2).
       - name: Measure
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PERF_SCENARIOS: ${{ needs.select.outputs.scenarios }}
         with:
           api-level: 34
           arch: x86_64
@@ -148,20 +218,26 @@ jobs:
           # 별도 인자로 파이썬에 전달돼 매번 터진다. 반드시 한 줄로 써야 한다.
           script: |
             export PERF_DEVICE=$(adb devices | awk 'NR==2{print $1}')
-            PYTHONPATH=_perfkit/tool python -m perfkit run --out runs ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }}
+            PYTHONPATH=_perfkit/tool python -m perfkit run --out runs ${{ inputs.repeats && format('--repeats {0}', inputs.repeats) || '' }} ${PERF_SCENARIOS:+--scenarios "$PERF_SCENARIOS"}
 
       - name: Aggregate
-        run: PYTHONPATH=_perfkit/tool python -m perfkit aggregate --runs runs --out current.json
+        env:
+          SCENARIOS: ${{ needs.select.outputs.scenarios }}
+        run: PYTHONPATH=_perfkit/tool python -m perfkit aggregate --runs runs --out current.json --scenarios "$SCENARIOS"
 
       - name: Check against baseline
         id: check
         continue-on-error: true
+        env:
+          SCENARIOS: ${{ needs.select.outputs.scenarios }}
+          SELECT_NOTE: ${{ needs.select.outputs.note }}
         run: |
           PYTHONPATH=_perfkit/tool python -m perfkit check \
             --current current.json \
             --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            --out perf_report.md --rows-out perf_rows.json
+            --out perf_report.md --rows-out perf_rows.json \
+            --scenarios "$SCENARIOS" --note "$SELECT_NOTE"
 
       - name: Report
         env:
