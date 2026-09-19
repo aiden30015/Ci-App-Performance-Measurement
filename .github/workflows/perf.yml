@@ -30,4 +30,7 @@ jobs:
     with:
       rebaseline: ${{ inputs.rebaseline == true }}
       repeats: ${{ inputs.repeats || '' }}
+      # self-call 은 테스트 대상 커밋의 도구를 써야 한다. 기본값(main)이면 PR 이 바꾼
+      # 도구 대신 옛 main 의 도구가 돌아서 새 옵션을 검증할 수 없다.
+      perfkit-ref: ${{ github.event.pull_request.head.sha || github.sha }}
     secrets: inherit
