@@ -27,12 +27,15 @@ def render(
     dashboard_url: str = "",
     baseline_info: dict | None = None,
     warnings: list[str] | None = None,
+    notes: list[str] | None = None,
 ) -> str:
     ok_rows = [r for r in rows if r.get("metric")]
     fails = [r for r in ok_rows if r.get("verdict") == "fail"]
     missing = [r["scenario"] for r in rows if r.get("status") == "missing"]
 
     md = ["## 📊 Flutter Performance Report", ""]
+    for n in notes or []:
+        md += [f"> ℹ️ {n}", ""]
     if fails:
         md += [f"### ❌ Performance Regression — {len(fails)}건", ""]
         for r in fails:

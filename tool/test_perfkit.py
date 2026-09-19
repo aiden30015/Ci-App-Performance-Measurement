@@ -207,6 +207,59 @@ def test_cli_end_to_end():
         assert (d / "site" / store.HISTORY).exists()
 
 
+SEL_CFG = {
+    "scenarios": ["app_startup", "login", "member_list_scroll", "outing_state_scroll"],
+    "selection": {
+        "ignore": ["**/*.md", "docs/**"],
+        "scenarios": {
+            "login": ["lib/features/auth/**"],
+            "member_list_scroll": ["lib/features/member/**"],
+            "outing_state_scroll": ["lib/features/outing/**"],
+        },
+    },
+}
+
+
+def test_select_only_related_scenarios():
+    from perfkit import select as S
+    r = S.select(["lib/features/member/presentation/widgets/a.dart", "README.md"], SEL_CFG)
+    assert r["scenarios"] == ["member_list_scroll"] and not r["skip"]
+    r = S.select(["lib/features/member/a.dart", "lib/features/auth/b.dart"], SEL_CFG)
+    assert r["scenarios"] == ["login", "member_list_scroll"]
+
+
+def test_select_unmapped_change_runs_everything():
+    from perfkit import select as S
+    r = S.select(["lib/features/member/a.dart", "lib/core/http.dart"], SEL_CFG)
+    assert r["scenarios"] == SEL_CFG["scenarios"] and not r["skip"]
+
+
+def test_select_ignored_only_skips_and_no_config_runs_all():
+    from perfkit import select as S
+    assert S.select(["docs/a.png", "CHANGELOG.md"], SEL_CFG)["skip"]
+    r = S.select(["lib/x.dart"], {"scenarios": ["a", "b"]})
+    assert r["scenarios"] == ["a", "b"] and not r["skip"]
+
+
+def test_glob_semantics():
+    from perfkit import select as S
+    assert S.matches("lib/features/member/x/y.dart", ["lib/features/member/**"])
+    assert S.matches("a/b/README.md", ["**/*.md"]) and S.matches("README.md", ["**/*.md"])
+    assert not S.matches("lib/features/members/x.dart", ["lib/features/member/**"])
+    assert not S.matches("lib/a/b.dart", ["lib/*.dart"])
+
+
+def test_check_with_subset_ignores_unselected_scenarios():
+    cur = {"scenarios": {"a": {"metrics": {"fps": {"value": 60, "noise": 0.1}}}}, "repeats": 1}
+    base = {"scenarios": {
+        "a": {"metrics": {"fps": {"value": 60, "noise": 0.1}}},
+        "b": {"metrics": {"fps": {"value": 60, "noise": 0.1}}}}}
+    rows = detect.judge(B.compare(base, cur, ["a"]), {**CFG, "scenarios": ["a", "b"]})
+    assert not any(r.get("status") == "missing" for r in rows)
+    md = report.render(rows, headline=["fps"], notes=["일부만 측정"])
+    assert "일부만 측정" in md
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

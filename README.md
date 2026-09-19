@@ -76,6 +76,26 @@ python -m http.server -d site 8000
 3. 첫 실행에서 `rebaseline` 으로 기준을 만들고 커밋합니다.
 4. GitHub Pages 를 켜고 `perf.yaml` 의 `dashboard_url` 에 주소를 넣으면 PR 코멘트에 링크가 붙습니다.
 
+## PR 에서 관련 시나리오만 돌리기 (선택)
+
+에뮬레이터 측정은 12~15분이라 모든 PR 마다 전부 돌리면 무겁습니다. `perf.yaml` 에 시나리오별
+관련 경로를 적고 재사용 workflow 에 `select-changed: true` 를 주면, PR 에서 변경된 파일과
+겹치는 시나리오만 측정합니다.
+
+```yaml
+selection:
+  ignore: ["**/*.md", "docs/**"]            # 이것만 바뀌면 측정 자체를 건너뜀
+  scenarios:
+    member_list_scroll: ["lib/features/member/**"]
+    login: ["lib/features/auth/**", "lib/features/splash/**"]
+```
+
+- 어떤 시나리오에도 안 걸리는 파일(공통 코드, 빌드 설정 등)이 하나라도 바뀌면 **전체**를 돕니다. 놓치는 쪽보다 더 도는 쪽이 안전하기 때문입니다.
+- `selection` 이 없으면 전체를 돕니다. push·수동 실행도 항상 전체입니다 (히스토리/baseline 은 전체 결과여야 하므로).
+- 수동으로 고르려면 `scenarios: 'home_scroll,login'` 입력을 씁니다. 부분 결과로는 `rebaseline` 할 수 없습니다.
+- PR 코멘트 상단에 왜 그 시나리오를 골랐는지, 무엇을 건너뛰었는지 표시됩니다.
+- 로컬 확인: `perfkit select --base origin/main`
+
 ## 알아둘 것
 
 - `app_startup` 은 integration test 가 아니라 `flutter run --trace-startup` 으로 잽니다
