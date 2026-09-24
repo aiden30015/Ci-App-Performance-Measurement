@@ -64,3 +64,9 @@ def judge(rows: list[dict], config: dict) -> list[dict]:
 
 def failed(rows: list[dict]) -> list[dict]:
     return [r for r in rows if r.get("verdict") == "fail"]
+
+
+def retry_targets(rows: list[dict]) -> list[str]:
+    """다시 측정할 시나리오: 회귀가 난 것 + 결과가 아예 없는 것 (DESIGN §6.7)."""
+    return sorted({r["scenario"] for r in rows
+                   if r.get("verdict") == "fail" or r.get("status") == "missing"})

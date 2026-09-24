@@ -4,6 +4,7 @@
   perfkit run          시나리오를 N회 측정 → runs/run-<i>/<scenario>.json
   perfkit aggregate    runs/ → current.json
   perfkit check        current.json vs baseline → perf_report.md (+ exit 1)
+  perfkit merge        재측정 결과를 current.json 에 시나리오 단위로 덮어쓰기
   perfkit rebaseline   current.json → baseline/performance_baseline.json
   perfkit store        history.jsonl / regressions.jsonl append
   perfkit dashboard    정적 대시보드 디렉터리 생성
@@ -186,6 +187,9 @@ def cmd_check(a) -> int:
 
     only = _csv(a.scenarios)
     notes = [a.note] if a.note else []
+    if a.first_rows:
+        first = json.loads(Path(a.first_rows).read_text(encoding="utf-8"))
+        notes.append(report.retry_note(first, current.get("retried", [])))
     if only:
         skipped = [x for x in cfg.get("scenarios", []) if x not in only]
         notes.append(f"측정한 시나리오: {', '.join(f'`{x}`' for x in only)}"
@@ -210,7 +214,22 @@ def cmd_check(a) -> int:
     missing = [r["scenario"] for r in rows if r.get("status") == "missing"]
     if missing:
         print(f"[perfkit] 결과가 없는 시나리오: {', '.join(missing)}", file=sys.stderr)
+    gh = os.environ.get("GITHUB_OUTPUT")
+    if gh:
+        # 재측정 job 이 이 목록만 다시 잰다 (DESIGN §6.7).
+        with open(gh, "a", encoding="utf-8") as f:
+            f.write(f"retry_scenarios={','.join(detect.retry_targets(rows))}\n")
     return 1 if (detect.failed(rows) or missing) else 0
+
+
+# -------------------------------------------------------------------- merge
+def cmd_merge(a) -> int:
+    current = json.loads(Path(a.current).read_text(encoding="utf-8"))
+    retry = json.loads(Path(a.retry).read_text(encoding="utf-8"))
+    merged = metrics.merge(current, retry)
+    Path(a.out).write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
+    print(f"[perfkit] {a.out}: 재측정으로 교체 → {', '.join(merged['retried']) or '없음'}")
+    return 0
 
 
 # --------------------------------------------------------------- rebaseline
@@ -393,7 +412,15 @@ def main(argv=None) -> int:
     c.add_argument("--dashboard-url", default="")
     c.add_argument("--scenarios", default="", help="이 시나리오만 비교 (비면 전체)")
     c.add_argument("--note", default="", help="리포트 상단에 붙일 안내 (예: 선택 사유)")
+    c.add_argument("--first-rows", default="",
+                   help="재측정한 경우 1차 check 의 rows (리포트에 1차 결과를 남긴다)")
     c.set_defaults(fn=cmd_check)
+
+    m = sub.add_parser("merge", help="재측정 결과를 1차 current 에 시나리오 단위로 덮어쓰기")
+    m.add_argument("--current", default="current.json")
+    m.add_argument("--retry", default="retry.json")
+    m.add_argument("--out", default="current.json")
+    m.set_defaults(fn=cmd_merge)
 
     b = sub.add_parser("rebaseline", help="현재 결과를 새 baseline 으로")
     b.add_argument("--current", default="current.json")

@@ -96,6 +96,20 @@ def render(
     return "\n".join(md)
 
 
+def retry_note(first_rows: list[dict], retried: list[str]) -> str:
+    """재측정 안내 한 줄. 1차에서 왜 다시 쟀는지(무엇이 넘었는지)를 남긴다."""
+    fails = [r for r in first_rows if r.get("verdict") == "fail"]
+    missing = [r["scenario"] for r in first_rows if r.get("status") == "missing"]
+    first = [f"`{r['scenario']} / {r['metric']}` "
+             f"{_num(r['baseline'], r['unit'])} → {_num(r['current'], r['unit'])} ({_change(r)})"
+             for r in fails]
+    first += [f"`{s}` 결과 없음" for s in missing]
+    done = ", ".join(f"`{s}`" for s in retried) or "없음"
+    return (f"1차 측정에서 회귀로 판정돼 새 러너에서 다시 측정했습니다 (재측정: {done}). "
+            "아래 표는 재측정 값이고, 재측정에서도 기준을 넘은 것만 실패로 봅니다. "
+            f"1차 결과: {'; '.join(first) or '—'}")
+
+
 def _row(r: dict) -> str:
     return (
         f"| {_ICON.get(r.get('verdict', r.get('status')), '')} | {r['metric']} "
