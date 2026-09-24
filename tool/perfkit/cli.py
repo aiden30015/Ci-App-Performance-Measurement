@@ -111,6 +111,8 @@ def cmd_run(a) -> int:
                "--target=integration_test/perf_test.dart"]
         if drive_only:
             cmd.append(f"--dart-define=PERF_SCENARIOS={','.join(drive_only)}")
+        for d in a.dart_define or []:
+            cmd.append(f"--dart-define={d}")
         if a.device:
             cmd += ["-d", a.device]
         print(f"[perfkit] run {i}/{repeats}: {' '.join(cmd)}", flush=True)
@@ -373,6 +375,7 @@ def main(argv=None) -> int:
     r.add_argument("--app", default=".")
     r.add_argument("--device", default=os.environ.get("PERF_DEVICE"))
     r.add_argument("--repeats", type=int)
+    r.add_argument("--dart-define", action="append", dest="dart_define")
     r.add_argument("--scenarios", default="", help="쉼표로 구분한 일부 시나리오만 (비면 전체)")
     r.add_argument("--strict", action="store_true", help="한 번이라도 실패하면 중단")
     r.set_defaults(fn=cmd_run)

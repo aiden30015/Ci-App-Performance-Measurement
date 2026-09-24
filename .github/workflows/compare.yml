@@ -1,0 +1,96 @@
+name: frameguard-compare
+
+# perfkit vs FrameGuard 판정 정확도 비교 실험 (exp/frameguard-compare 전용).
+# 측정만 하고 판정은 로컬에서 artifact 를 받아 두 도구로 각각 돌린다.
+#   stored : 러너(에뮬레이터 부팅)마다 한 버전만 측정 → "저장된 baseline 과 비교" 방식 재현
+#   paired : 한 러너에서 base / variant 를 번갈아 측정 → "같은 러너 A/B" 방식
+on:
+  # workflow_dispatch 는 기본 브랜치에 파일이 있어야 해서 실험 브랜치 push 로 돌린다.
+  push:
+    branches: [exp/frameguard-compare]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: ${{ matrix.mode }} inject=${{ matrix.inject }} #${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # stored: 0µs 10대, 2000µs 8대, 5000µs 8대
+          - { mode: stored, inject: 0, shard: 1 }
+          - { mode: stored, inject: 0, shard: 2 }
+          - { mode: stored, inject: 0, shard: 3 }
+          - { mode: stored, inject: 0, shard: 4 }
+          - { mode: stored, inject: 0, shard: 5 }
+          - { mode: stored, inject: 0, shard: 6 }
+          - { mode: stored, inject: 0, shard: 7 }
+          - { mode: stored, inject: 0, shard: 8 }
+          - { mode: stored, inject: 0, shard: 9 }
+          - { mode: stored, inject: 0, shard: 10 }
+          - { mode: stored, inject: 2000, shard: 1 }
+          - { mode: stored, inject: 2000, shard: 2 }
+          - { mode: stored, inject: 2000, shard: 3 }
+          - { mode: stored, inject: 2000, shard: 4 }
+          - { mode: stored, inject: 2000, shard: 5 }
+          - { mode: stored, inject: 2000, shard: 6 }
+          - { mode: stored, inject: 2000, shard: 7 }
+          - { mode: stored, inject: 2000, shard: 8 }
+          - { mode: stored, inject: 5000, shard: 1 }
+          - { mode: stored, inject: 5000, shard: 2 }
+          - { mode: stored, inject: 5000, shard: 3 }
+          - { mode: stored, inject: 5000, shard: 4 }
+          - { mode: stored, inject: 5000, shard: 5 }
+          - { mode: stored, inject: 5000, shard: 6 }
+          - { mode: stored, inject: 5000, shard: 7 }
+          - { mode: stored, inject: 5000, shard: 8 }
+          # paired: A/A 5대, A/B(2000µs) 5대
+          - { mode: paired, inject: 0, shard: 1 }
+          - { mode: paired, inject: 0, shard: 2 }
+          - { mode: paired, inject: 0, shard: 3 }
+          - { mode: paired, inject: 0, shard: 4 }
+          - { mode: paired, inject: 0, shard: 5 }
+          - { mode: paired, inject: 2000, shard: 1 }
+          - { mode: paired, inject: 2000, shard: 2 }
+          - { mode: paired, inject: 2000, shard: 3 }
+          - { mode: paired, inject: 2000, shard: 4 }
+          - { mode: paired, inject: 2000, shard: 5 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pyyaml
+      - run: flutter pub get
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Measure
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          MODE: ${{ matrix.mode }}
+          INJECT: ${{ matrix.inject }}
+          REPEATS: '3'
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          disable-animations: true
+          script: bash tool/experiment/measure.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.mode }}-${{ matrix.inject }}-${{ matrix.shard }}
+          path: out
+          if-no-files-found: warn

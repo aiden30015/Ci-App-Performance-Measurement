@@ -2,8 +2,24 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
-void main() => runApp(const DemoApp());
+/// 비교 실험용 인위적 회귀. 매 프레임 build 단계에서 이만큼(µs) CPU 를 태운다.
+/// 0 이면 아무것도 안 한다. --dart-define=PERF_INJECT_US=2000
+const _injectUs = int.fromEnvironment('PERF_INJECT_US');
+bool _injected = false;
+
+void main() {
+  runApp(const DemoApp());
+  // 시나리오마다 main() 이 다시 불리므로 콜백은 한 번만 건다.
+  if (_injectUs > 0 && !_injected) {
+    _injected = true;
+    SchedulerBinding.instance.addPersistentFrameCallback((_) {
+      final sw = Stopwatch()..start();
+      while (sw.elapsedMicroseconds < _injectUs) {}
+    });
+  }
+}
 
 /// 성능 시나리오를 태울 대상 앱. 실제 프로젝트에서는 이 파일만 여러분의 앱으로
 /// 바꾸고 integration_test/perf_test.dart 의 시나리오 본문을 맞춰주면 됩니다.

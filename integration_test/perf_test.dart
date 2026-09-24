@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frameguard/frameguard_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 // 실제 앱으로 교체할 때 이 import 와 각 시나리오 본문만 바꾸면 된다.
@@ -83,8 +84,19 @@ void scenario(
     await tester.pumpAndSettle();
 
     final wall = Stopwatch()..start();
-    await binding.traceAction(() => body(tester), reportKey: 'timeline:$name');
+    // 같은 스크롤을 Timeline(perfkit) 과 FrameTiming(FrameGuard) 이 동시에 본다.
+    late Map<String, Object?> fg;
+    await binding.traceAction(() async {
+      final report = await FrameGuardTest.measure(
+        tester,
+        name: name,
+        action: () => body(tester),
+        warmupFrames: 0,
+      );
+      fg = report.toJson();
+    }, reportKey: 'timeline:$name');
     wall.stop();
+    binding.reportData!['frameguard:$name'] = fg;
 
     binding.reportData!['meta:$name'] = {
       'scenario': name,

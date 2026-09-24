@@ -42,6 +42,8 @@ dev_dependencies:
     sdk: flutter
   flutter_driver:
     sdk: flutter
+  # 비교 실험용 (exp/frameguard-compare). 같은 스크롤을 FrameGuard 로도 잰다.
+  frameguard: 0.6.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

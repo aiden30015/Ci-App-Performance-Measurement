@@ -27,6 +27,15 @@ Future<void> main() async {
     );
     await outDir.create(recursive: true);
 
+    // 비교 실험: FrameGuard 리포트는 하위 폴더에 따로 둔다 (aggregate 는 *.json 만 본다).
+    for (final entry in data.entries) {
+      if (!entry.key.startsWith('frameguard:')) continue;
+      final fgDir = Directory('${outDir.path}/frameguard');
+      await fgDir.create(recursive: true);
+      await File('${fgDir.path}/${entry.key.substring('frameguard:'.length)}.json')
+          .writeAsString(jsonEncode(entry.value));
+    }
+
     for (final entry in data.entries) {
       if (!entry.key.startsWith('timeline:')) continue;
       final name = entry.key.substring('timeline:'.length);
