@@ -36,7 +36,7 @@ def fg_files(run_dirs: list[Path], scen: str) -> list[str]:
 
 def load(art: Path):
     stored, paired = defaultdict(list), defaultdict(list)
-    for d in sorted(art.iterdir()):
+    for d in sorted(x for x in art.iterdir() if x.is_dir()):
         mode, inject, shard = d.name.split("-")
         if mode == "stored":
             r = runs_of(d)
@@ -54,6 +54,34 @@ def pk_fail(base_runs, cur_runs, cfg) -> dict[str, bool]:
     cur = metrics.aggregate(cur_runs, SCEN)
     rows = detect.judge(B.compare(base, cur, SCEN), cfg)
     return {s: any(r["scenario"] == s and r.get("verdict") == "fail" for r in rows) for s in SCEN}
+
+
+def fg_rule_on_timeline(base_runs, cur_runs) -> dict[str, bool]:
+    """FrameGuard 의 판정 규칙(StatisticalRegression 기본값)을 perfkit 이 모은
+    Timeline 데이터에 그대로 적용한다. 수집기 차이와 판정 규칙 차이를 떼어 보려는 것.
+    규칙: median p95 상대변화 > 15%  또는  median jank_rate 증가 > 1%p."""
+    import statistics
+
+    def per_run(runs, s):
+        out = []
+        for d in runs:
+            f = d / f"{s}.json"
+            if f.exists():
+                m = metrics.normalize(json.loads(f.read_text(encoding="utf-8")))
+                if "p95_frame_time_ms" in m:
+                    out.append((m["p95_frame_time_ms"], m["jank_rate"] / 100))
+        return out
+
+    res = {}
+    for s in SCEN:
+        b, c = per_run(base_runs, s), per_run(cur_runs, s)
+        if len(b) < 3 or len(c) < 3:
+            continue
+        bp, cp = statistics.median(x[0] for x in b), statistics.median(x[0] for x in c)
+        bj, cj = statistics.median(x[1] for x in b), statistics.median(x[1] for x in c)
+        rel = (cp - bp) / bp if bp else 0.0
+        res[s] = rel > 0.15 or (cj - bj) > 0.01
+    return res
 
 
 def main():
@@ -101,6 +129,9 @@ def main():
             for s, f in pk_fail(b, c, cfg).items():
                 t = tally[(f"perfkit[{name}]", proto, inj, s)]
                 t[0] += f; t[1] += 1
+        for s, f in fg_rule_on_timeline(b, c).items():
+            t = tally[("fg-rule@timeline", proto, inj, s)]
+            t[0] += f; t[1] += 1
         for s in SCEN:
             r = fg.get(f"{i}|{s}")
             if r:
