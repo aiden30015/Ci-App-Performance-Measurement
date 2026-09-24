@@ -45,6 +45,13 @@ on:
           대시보드 갱신만 건너뛴다.
         type: string
         default: '["main"]'
+      baseline-runners:
+        description: >-
+          rebaseline 때 측정할 러너 수. 러너마다 새 VM + 새 에뮬레이터에서 repeats 회씩 재고
+          모든 표본을 합쳐 baseline 을 만든다. 그래야 noise 에 러너 간 편차가 들어가서
+          σ 게이트가 실제 CI 편차를 알게 된다 (DESIGN §6.8). 1 이면 기존처럼 한 대만 쓴다.
+        type: string
+        default: '5'
       retry-on-regression:
         description: >-
           true 면 회귀(또는 결과 없음)가 난 시나리오만 새 러너에서 한 번 더 측정하고,
@@ -85,6 +92,7 @@ jobs:
       scenarios: ${{ steps.pick.outputs.scenarios }}
       skip: ${{ steps.pick.outputs.skip }}
       note: ${{ steps.pick.outputs.note }}
+      baseline_shards: ${{ steps.shards.outputs.list }}
     steps:
       - name: Checkout app repo
         uses: actions/checkout@v4
@@ -127,6 +135,17 @@ jobs:
               echo "skip=false"
               echo "note="
             } >> "$GITHUB_OUTPUT"
+          fi
+      # rebaseline 이면 1차 measure 러너 말고 추가로 띄울 러너 번호 목록 (2..N).
+      - id: shards
+        env:
+          REBASELINE: ${{ inputs.rebaseline }}
+          RUNNERS: ${{ inputs.baseline-runners }}
+        run: |
+          if [ "$REBASELINE" = "true" ] && [ "${RUNNERS:-1}" -gt 1 ]; then
+            echo "list=[$(seq -s, 2 "$RUNNERS")]" >> "$GITHUB_OUTPUT"
+          else
+            echo "list=[]" >> "$GITHUB_OUTPUT"
           fi
 
   # 1차 측정. 회귀가 나면 그 시나리오 목록만 output 으로 넘긴다 — 판정·리포트·기록은
@@ -215,10 +234,43 @@ jobs:
           retention-days: 30
           overwrite: true
 
+  # rebaseline 전용: 러너를 더 띄워 같은 커밋을 잰다. perf job 이 1차 measure 결과와
+  # 합쳐서 baseline 을 만든다 (DESIGN §6.8).
+  baseline-runners:
+    needs: select
+    if: needs.select.outputs.baseline_shards != '[]' && needs.select.outputs.baseline_shards != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.select.outputs.baseline_shards) }}
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+      - name: Checkout perfkit
+        uses: actions/checkout@v4
+        with:
+          repository: aiden30015/Ci-App-Performance-Measurement
+          ref: ${{ inputs.perfkit-ref }}
+          path: _perfkit
+
+      - uses: ./_perfkit/.github/actions/measure
+        with:
+          repeats: ${{ inputs.repeats }}
+          env-file: ${{ secrets.env_file }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-${{ matrix.shard }}
+          path: runs/
+          retention-days: 30
+          overwrite: true
+
   # 최종 판정·리포트·기록. 재측정을 했으면 그 시나리오는 재측정 값으로 판정한다.
   # job 이름을 perf 로 유지해서 호출한 repo 의 체크 이름(`perf / perf`)이 바뀌지 않게 한다.
   perf:
-    needs: [select, measure, remeasure]
+    needs: [select, measure, remeasure, baseline-runners]
     # remeasure 가 skip 돼도 돌아야 하고, measure 가 깨졌을 때도 돌아서 빨갛게 끝나야 한다
     # (skip 으로 끝나면 필수 체크가 통과로 취급된다).
     if: always() && needs.select.result == 'success' && needs.select.outputs.skip != 'true'
@@ -337,13 +389,38 @@ jobs:
           path: site
 
       # ---- 수동 rebaseline: 자동 커밋하지 않고 리뷰 가능한 PR 로 만든다 (DESIGN §6.4).
+      - uses: actions/download-artifact@v4
+        if: inputs.rebaseline && needs.baseline-runners.result != 'skipped'
+        with:
+          pattern: perf-baseline-*
+          path: extra
+
+      # 러너마다 잰 표본을 전부 합쳐 baseline 을 만든다 (DESIGN §6.8). 추가 러너 일부가
+      # 깨졌으면 모인 것만으로 만들고 PR 본문에 몇 대였는지 남긴다.
+      - name: Pool runners
+        id: pool
+        if: inputs.rebaseline
+        env:
+          WANTED: ${{ inputs.baseline-runners }}
+        run: |
+          runs=(attempt1/runs)
+          for d in extra/*/; do
+            [ -d "$d" ] && runs+=("${d%/}")
+          done
+          PYTHONPATH=_perfkit/tool python -m perfkit aggregate --runs "${runs[@]}" --out pooled.json
+          echo "count=${#runs[@]}" >> "$GITHUB_OUTPUT"
+          if [ "${#runs[@]}" -lt "${WANTED:-1}" ]; then
+            echo "::warning::baseline 러너 ${WANTED}대 중 ${#runs[@]}대 결과만 모였습니다."
+          fi
+
       - name: Rebaseline PR
         if: inputs.rebaseline
         env:
           GH_TOKEN: ${{ github.token }}
+          RUNNERS: ${{ steps.pool.outputs.count }}
         run: |
           PYTHONPATH=_perfkit/tool python -m perfkit rebaseline \
-            --current current.json --commit "${{ github.sha }}" | tee rebaseline.log
+            --current pooled.json --commit "${{ github.sha }}" | tee rebaseline.log
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           branch="perf/rebaseline-${{ github.run_id }}"
@@ -352,8 +429,8 @@ jobs:
           git commit -m "perf: rebaseline from ${{ github.sha }}"
           git push origin "$branch"
           gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
-            --body "$(printf 'run %s 의 측정값으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
-                      "${{ github.run_id }}" "$(cat rebaseline.log)")"
+            --body "$(printf 'run %s 의 측정값(러너 %s대)으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
+                      "${{ github.run_id }}" "$RUNNERS" "$(cat rebaseline.log)")"
 
       - name: Fail on regression
         if: steps.check.outcome == 'failure'

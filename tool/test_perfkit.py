@@ -314,6 +314,33 @@ def test_cli_check_exports_retry_targets():
         assert "다시 측정" in md and "`a / fps`" in md
 
 
+def test_aggregate_pools_runners_so_noise_includes_runner_spread():
+    """러너 2대를 합쳐 집계하면 러너 간 차이가 noise 에 들어가야 한다.
+    한 러너 안에서는 거의 같은 값이어도(노이즈≈0) 러너끼리 값이 다르면 합친 noise 는 커진다."""
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "perf.yaml").write_text("scenarios: [a]\n", encoding="utf-8")
+        for runner, base in (("r1", 10.0), ("r2", 14.0)):
+            for i, jitter in enumerate((0.0, 0.1, 0.2), 1):
+                run = d / runner / f"run-{i}"
+                run.mkdir(parents=True)
+                (run / "a.json").write_text(json.dumps(
+                    {"scenario": "a", "duration_ms": base + jitter}), encoding="utf-8")
+        env = {"PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": ""}
+
+        def agg(out, *runs):
+            assert subprocess.call([sys.executable, "-m", "perfkit", "aggregate",
+                                    "--runs", *runs, "--out", out], cwd=d, env=env) == 0
+            return json.loads((d / out).read_text(encoding="utf-8"))
+
+        one = agg("one.json", "r1")["scenarios"]["a"]["metrics"]["duration_ms"]
+        both = agg("both.json", "r1", "r2")
+        pooled = both["scenarios"]["a"]["metrics"]["duration_ms"]
+        assert both["repeats"] == 6 and len(pooled["samples"]) == 6
+        assert one["noise"] < 0.5 < pooled["noise"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
