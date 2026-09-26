@@ -272,8 +272,9 @@ jobs:
   perf:
     needs: [select, measure, remeasure, baseline-runners]
     # remeasure 가 skip 돼도 돌아야 하고, measure 가 깨졌을 때도 돌아서 빨갛게 끝나야 한다
-    # (skip 으로 끝나면 필수 체크가 통과로 취급된다).
-    if: always() && needs.select.result == 'success' && needs.select.outputs.skip != 'true'
+    # (skip 으로 끝나면 필수 체크가 통과로 취급된다). 다만 run 자체가 취소됐을 때는
+    # 돌지 않는다 — 새 커밋 push 로 취소된 run 이 PR 에 실패로 찍히지 않게.
+    if: "!cancelled() && needs.select.result == 'success' && needs.select.outputs.skip != 'true'"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
