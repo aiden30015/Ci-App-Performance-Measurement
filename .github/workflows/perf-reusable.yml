@@ -428,9 +428,15 @@ jobs:
           git add baseline/performance_baseline.json
           git commit -m "perf: rebaseline from ${{ github.sha }}"
           git push origin "$branch"
-          gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
+          # repo 설정 "Allow GitHub Actions to create and approve pull requests" 가 꺼져 있으면
+          # PR 생성이 거부된다. baseline 은 이미 브랜치에 올라갔으니 실패로 끝내지 않고 링크를 남긴다.
+          if ! gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
             --body "$(printf 'run %s 의 측정값(러너 %s대)으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
-                      "${{ github.run_id }}" "$RUNNERS" "$(cat rebaseline.log)")"
+                      "${{ github.run_id }}" "$RUNNERS" "$(cat rebaseline.log)")"; then
+            url="${{ github.server_url }}/${{ github.repository }}/compare/${{ github.ref_name }}...$branch?expand=1"
+            echo "::warning::PR 을 자동으로 만들지 못했습니다. 직접 여세요: $url"
+            printf '### 📌 rebaseline 브랜치\n\nPR 을 자동으로 만들지 못했습니다. [여기서 PR 열기](%s)\n' "$url" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Fail on regression
         if: steps.check.outcome == 'failure'
