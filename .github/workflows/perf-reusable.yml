@@ -16,7 +16,7 @@ on:
         type: string
         default: main
       rebaseline:
-        description: '현재 측정값으로 baseline 을 갱신하는 PR 생성'
+        description: '현재 측정값으로 baseline 을 갱신해 이 브랜치에 커밋'
         type: boolean
         default: false
       repeats:
@@ -388,7 +388,7 @@ jobs:
         with:
           path: site
 
-      # ---- 수동 rebaseline: 자동 커밋하지 않고 리뷰 가능한 PR 로 만든다 (DESIGN §6.4).
+      # ---- 수동 rebaseline: 실행한 브랜치에 커밋하고 그 PR 에 알린다 (DESIGN §6.4).
       - uses: actions/download-artifact@v4
         if: inputs.rebaseline && needs.baseline-runners.result != 'skipped'
         with:
@@ -413,29 +413,39 @@ jobs:
             echo "::warning::baseline 러너 ${WANTED}대 중 ${#runs[@]}대 결과만 모였습니다."
           fi
 
-      - name: Rebaseline PR
+      # 새 PR 을 만들지 않고 rebaseline 을 돌린 브랜치에 바로 커밋한다. 보통 작업 중인 PR
+      # 브랜치에서 돌리므로, 그 PR 에 baseline 이 바뀌었다는 코멘트를 남겨 리뷰어가 알게 한다.
+      # 기본 브랜치에서 돌렸을 때만 리뷰 없이 들어가지 않도록 별도 브랜치로 올린다.
+      - name: Rebaseline
         if: inputs.rebaseline
         env:
           GH_TOKEN: ${{ github.token }}
           RUNNERS: ${{ steps.pool.outputs.count }}
+          REF: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           PYTHONPATH=_perfkit/tool python -m perfkit rebaseline \
             --current pooled.json --commit "${{ github.sha }}" | tee rebaseline.log
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          branch="perf/rebaseline-${{ github.run_id }}"
-          git checkout -b "$branch"
           git add baseline/performance_baseline.json
-          git commit -m "perf: rebaseline from ${{ github.sha }}"
-          git push origin "$branch"
-          # repo 설정 "Allow GitHub Actions to create and approve pull requests" 가 꺼져 있으면
-          # PR 생성이 거부된다. baseline 은 이미 브랜치에 올라갔으니 실패로 끝내지 않고 링크를 남긴다.
-          if ! gh pr create --title "perf: rebaseline (run ${{ github.run_id }})" \
-            --body "$(printf 'run %s 의 측정값(러너 %s대)으로 baseline 을 갱신합니다.\n\n```\n%s\n```\n' \
-                      "${{ github.run_id }}" "$RUNNERS" "$(cat rebaseline.log)")"; then
-            url="${{ github.server_url }}/${{ github.repository }}/compare/${{ github.ref_name }}...$branch?expand=1"
-            echo "::warning::PR 을 자동으로 만들지 못했습니다. 직접 여세요: $url"
-            printf '### 📌 rebaseline 브랜치\n\nPR 을 자동으로 만들지 못했습니다. [여기서 PR 열기](%s)\n' "$url" >> "$GITHUB_STEP_SUMMARY"
+          git commit -m "perf: rebaseline (run ${{ github.run_id }}, 러너 ${RUNNERS}대)"
+          if [ "$REF" = "$DEFAULT_BRANCH" ]; then
+            target="perf/rebaseline-${{ github.run_id }}"
+          else
+            target="$REF"
+          fi
+          # 측정하는 사이 브랜치에 새 커밋이 올라왔으면 fast-forward 가 안 돼서 거부된다.
+          # 그때는 덮어쓰지 않고 실패로 알린다 (최신 커밋에서 다시 돌리면 된다).
+          git push origin "HEAD:refs/heads/$target"
+          sha=$(git rev-parse --short HEAD)
+          body=$(printf '### 📌 baseline 이 갱신되었습니다\n\nrun [%s](%s) 의 측정값(러너 %s대)으로 `baseline/performance_baseline.json` 을 갱신해 `%s` 에 커밋했습니다 (%s).\n\n```\n%s\n```\n' \
+                   "${{ github.run_id }}" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+                   "$RUNNERS" "$target" "$sha" "$(cat rebaseline.log)")
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          pr=$(gh pr list --head "$target" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr" ]; then
+            gh pr comment "$pr" --body "$body"
           fi
 
       - name: Fail on regression

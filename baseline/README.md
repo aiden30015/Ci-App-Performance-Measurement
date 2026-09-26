@@ -3,7 +3,8 @@
 `performance_baseline.json` 은 시나리오별 성능 기준값입니다. **자동으로 갱신되지 않습니다.**
 
 - 갱신: Actions → `perf` workflow → Run workflow → `rebaseline: true`
-  → `perf/rebaseline-<run>` 브랜치와 PR 이 만들어집니다. 사람이 보고 머지하세요.
+  → 실행한 브랜치에 baseline 커밋이 바로 올라가고, 그 브랜치의 PR 에 갱신 코멘트가 달립니다.
+  기본 브랜치에서 실행하면 `perf/rebaseline-<run>` 브랜치로 따로 올라갑니다.
 - 변경 이력: `git log -p baseline/performance_baseline.json`
 - 로컬에서: `PYTHONPATH=tool python -m perfkit rebaseline --commit "$(git rev-parse HEAD)"`
 

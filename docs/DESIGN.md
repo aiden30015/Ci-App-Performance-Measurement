@@ -191,7 +191,7 @@
 }
 ```
 - Git 파일이므로 변경 이력 = `git log baseline/performance_baseline.json`.
-- CI 는 절대 자동 커밋하지 않는다. `workflow_dispatch(rebaseline)` → PR 생성 → 사람이 머지.
+- CI 는 평소에 커밋하지 않는다. `workflow_dispatch(rebaseline)` 를 돌린 브랜치에만 커밋하고, 그 브랜치의 PR 에 갱신 코멘트를 남긴다 (§6.4).
 
 ### 4.4 History `history.jsonl` (한 줄 = 1 CI run × 1 scenario)
 ```json
@@ -257,7 +257,10 @@ append-only. 시나리오를 행에 풀어놨기 때문에 나중에 SQLite/Parq
   한 PR 당 −2% 는 게이트를 통과하지만, 30 커밋 뒤 −30% 는 추세선에서 바로 보인다. 이게 §7 이 게이트와 별개로 필요한 이유다.
 
 ### 6.4 Baseline drift
-- baseline 은 자동 갱신하지 않는다. 갱신은 `workflow_dispatch` → PR → 리뷰.
+- baseline 은 자동 갱신하지 않는다. 갱신은 작업 중인 PR 브랜치에서 `workflow_dispatch(rebaseline)` →
+  그 브랜치에 커밋 + PR 코멘트 → PR 리뷰와 함께 머지. 새 PR 을 따로 만들지 않는 건 Actions 의
+  PR 생성 권한이 꺼진 repo 가 많고, 코드 변경과 기준값 변경을 한 PR 에서 같이 보는 게 낫기 때문이다.
+  기본 브랜치에서 돌리면 리뷰 없이 들어가지 않도록 `perf/rebaseline-<run>` 브랜치로 올린다.
 - baseline 이 오래되면(기본 30일) 리포트에 경고 배지를 표시한다.
 - dashboard 는 baseline 변경 시점을 세로선으로 표시해 "성능이 좋아진 것"과 "기준을 낮춘 것"을 구분한다.
 
