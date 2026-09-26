@@ -128,7 +128,10 @@ def cmd_run(a) -> int:
 # ---------------------------------------------------------------- aggregate
 def cmd_aggregate(a) -> int:
     cfg = load_config(a.config)
-    current = metrics.aggregate(_run_dirs(Path(a.runs)),
+    # --runs 를 여러 개 주면(러너별 결과) 표본을 한데 모아 집계한다. 그러면 noise 에
+    # 러너 간 편차까지 들어간다 — rebaseline 을 러너 여러 대로 뜰 때 쓴다 (DESIGN §6.8).
+    dirs = [d for r in a.runs for d in _run_dirs(Path(r))]
+    current = metrics.aggregate(dirs,
                                 _csv(a.scenarios) or cfg.get("scenarios"))
     Path(a.out).write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
     print(f"[perfkit] {a.out}: {len(current['scenarios'])} scenarios "
@@ -397,7 +400,8 @@ def main(argv=None) -> int:
     r.set_defaults(fn=cmd_run)
 
     g = sub.add_parser("aggregate", help="반복 측정 집계")
-    g.add_argument("--runs", default="runs")
+    g.add_argument("--runs", nargs="+", default=["runs"],
+                   help="반복 결과 디렉터리. 여러 개면 모든 표본을 합쳐 집계")
     g.add_argument("--out", default="current.json")
     g.add_argument("--scenarios", default="", help="일부 시나리오만 집계 (비면 전체)")
     g.set_defaults(fn=cmd_aggregate)
