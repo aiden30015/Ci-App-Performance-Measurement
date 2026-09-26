@@ -143,3 +143,15 @@ def aggregate(run_dirs: list[Path], scenarios: list[str] | None = None) -> dict:
             "metrics": metrics,
         }
     return {"schema": 1, "repeats": len(run_dirs), "scenarios": result}
+
+
+def merge(current: dict, retry: dict) -> dict:
+    """1차 current 에 재측정 결과를 시나리오 단위로 덮어쓴다 (DESIGN §6.7).
+
+    재측정에서도 결과를 못 낸 시나리오는 1차 값을 그대로 둔다 — 재측정이 깨졌다고
+    1차의 회귀를 지워서 통과시키면 안 된다.
+    """
+    redone = retry.get("scenarios", {})
+    return {**current,
+            "scenarios": {**current.get("scenarios", {}), **redone},
+            "retried": sorted(redone)}

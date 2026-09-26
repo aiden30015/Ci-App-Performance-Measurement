@@ -260,6 +260,60 @@ def test_check_with_subset_ignores_unselected_scenarios():
     assert "일부만 측정" in md
 
 
+def test_retry_clears_one_off_slow_run_but_keeps_real_regression():
+    """1차에서 넘은 시나리오만 다시 재고, 재측정에서도 넘어야 실패다 (DESIGN §6.7)."""
+    base = {"scenarios": {
+        "a": {"metrics": {"p95_frame_time_ms": {"value": 12.0, "noise": 0.2}}},
+        "b": {"metrics": {"p95_frame_time_ms": {"value": 12.0, "noise": 0.2}}},
+        "c": {"metrics": {"p95_frame_time_ms": {"value": 12.0, "noise": 0.2}}}}}
+
+    def cur(**vals):
+        return {"repeats": 3, "scenarios": {
+            k: {"metrics": {"p95_frame_time_ms": {"value": v, "noise": 0.2, "samples": []}}}
+            for k, v in vals.items()}}
+
+    cfg = {**CFG, "scenarios": ["a", "b", "c"]}
+    first = detect.judge(B.compare(base, cur(a=20.0, b=20.0), ["a", "b", "c"]), cfg)
+    assert detect.retry_targets(first) == ["a", "b", "c"]      # c 는 결과 없음
+
+    # a 는 느린 러너 탓(재측정 정상), b 는 진짜 회귀, c 는 재측정도 결과 없음.
+    merged = metrics.merge(cur(a=20.0, b=20.0), cur(a=12.1, b=20.5))
+    assert merged["retried"] == ["a", "b"]
+    rows = detect.judge(B.compare(base, merged, ["a", "b", "c"]), cfg)
+    assert [r["scenario"] for r in detect.failed(rows)] == ["b"]
+    assert detect.retry_targets(rows) == ["b", "c"]
+
+    note = report.retry_note(first, merged["retried"])
+    assert "`a / p95_frame_time_ms`" in note and "`c` 결과 없음" in note
+
+
+def test_cli_check_exports_retry_targets():
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "perf.yaml").write_text("sigma: 2.0\nscenarios: [a]\n", encoding="utf-8")
+        (d / "b.json").write_text(json.dumps({"scenarios": {
+            "a": {"metrics": {"fps": {"value": 60.0, "noise": 0.1}}}}}), encoding="utf-8")
+        (d / "c.json").write_text(json.dumps({"scenarios": {
+            "a": {"metrics": {"fps": {"value": 40.0, "noise": 0.1}}}}}), encoding="utf-8")
+        (d / "r.json").write_text(json.dumps({"scenarios": {
+            "a": {"metrics": {"fps": {"value": 60.0, "noise": 0.1}}}}}), encoding="utf-8")
+        env = {"PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": "",
+               "GITHUB_OUTPUT": str(d / "out.txt")}
+
+        def perfkit(*args):
+            return subprocess.call([sys.executable, "-m", "perfkit", *args], cwd=d, env=env)
+
+        assert perfkit("check", "--baseline", "b.json", "--current", "c.json",
+                       "--rows-out", "rows1.json") == 1
+        assert "retry_scenarios=a" in (d / "out.txt").read_text(encoding="utf-8")
+        assert perfkit("merge", "--current", "c.json", "--retry", "r.json", "--out", "m.json") == 0
+        assert perfkit("check", "--baseline", "b.json", "--current", "m.json",
+                       "--first-rows", "rows1.json") == 0
+        md = (d / "perf_report.md").read_text(encoding="utf-8")
+        assert "다시 측정" in md and "`a / fps`" in md
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
