@@ -105,4 +105,6 @@ selection:
 - 다른 러너에서 뜬 baseline 과는 비교하지 마세요. `device_profile` 이 다르면 리포트가 경고합니다.
 - 회귀가 나면 그 시나리오만 새 러너에서 한 번 더 재고, 재측정에서도 넘을 때만 실패합니다
   (CI 러너마다 실행 전체가 느려지는 편차 대응, `docs/DESIGN.md` §6.7). 끄려면 `retry-on-regression: false`.
+- `rebaseline` 은 러너 5대(`baseline-runners`)에서 따로 재고 모든 표본을 합쳐 baseline 을 만듭니다.
+  러너 한 대로 만든 baseline 은 러너 간 편차를 몰라서 같은 코드도 자주 실패시킵니다 (`docs/DESIGN.md` §6.8).
 

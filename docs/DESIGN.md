@@ -191,7 +191,7 @@
 }
 ```
 - Git 파일이므로 변경 이력 = `git log baseline/performance_baseline.json`.
-- CI 는 절대 자동 커밋하지 않는다. `workflow_dispatch(rebaseline)` → PR 생성 → 사람이 머지.
+- CI 는 평소에 커밋하지 않는다. `workflow_dispatch(rebaseline)` 를 돌린 브랜치에만 커밋하고, 그 브랜치의 PR 에 갱신 코멘트를 남긴다 (§6.4).
 
 ### 4.4 History `history.jsonl` (한 줄 = 1 CI run × 1 scenario)
 ```json
@@ -257,7 +257,10 @@ append-only. 시나리오를 행에 풀어놨기 때문에 나중에 SQLite/Parq
   한 PR 당 −2% 는 게이트를 통과하지만, 30 커밋 뒤 −30% 는 추세선에서 바로 보인다. 이게 §7 이 게이트와 별개로 필요한 이유다.
 
 ### 6.4 Baseline drift
-- baseline 은 자동 갱신하지 않는다. 갱신은 `workflow_dispatch` → PR → 리뷰.
+- baseline 은 자동 갱신하지 않는다. 갱신은 작업 중인 PR 브랜치에서 `workflow_dispatch(rebaseline)` →
+  그 브랜치에 커밋 + PR 코멘트 → PR 리뷰와 함께 머지. 새 PR 을 따로 만들지 않는 건 Actions 의
+  PR 생성 권한이 꺼진 repo 가 많고, 코드 변경과 기준값 변경을 한 PR 에서 같이 보는 게 낫기 때문이다.
+  기본 브랜치에서 돌리면 리뷰 없이 들어가지 않도록 `perf/rebaseline-<run>` 브랜치로 올린다.
 - baseline 이 오래되면(기본 30일) 리포트에 경고 배지를 표시한다.
 - dashboard 는 baseline 변경 시점을 세로선으로 표시해 "성능이 좋아진 것"과 "기준을 낮춘 것"을 구분한다.
 
@@ -296,6 +299,24 @@ append-only. 시나리오를 행에 풀어놨기 때문에 나중에 SQLite/Parq
 - 비용: 회귀가 났을 때만 러너 1대 × (셋업 + 해당 시나리오 측정) 이 더 든다. 통과하는 PR 은 그대로다.
 - 한계: 진짜 회귀인데 1차가 우연히 빠른 러너였다면 원래도 못 잡는다 — 재측정은 false positive 만
   줄이고 감도는 그대로다. 두 번 연속 느린 러너에 걸리면 여전히 오탐이 날 수 있다.
+
+### 6.8 baseline 은 러너 여러 대로 뜬다
+- σ 게이트는 `noise_base` 와 `noise_current` 를 쓴다. baseline 을 러너 한 대(반복 3회)로 뜨면
+  `noise_base` 에 러너 간 편차가 없어서 게이트가 사실상 꺼진다.
+- 실측 (`exp/frameguard-compare`, 데모 앱, 러너 36대): 코드가 같아도 러너별 home_scroll p95 중앙값이
+  5.7~11.1ms 로 퍼졌다. 매 프레임 build 에 2ms/5ms 를 넣은 버전과 비교한 결과 —
+
+  | baseline | 오탐률 (같은 코드) | 탐지율 +2ms | 탐지율 +5ms |
+  |---|---|---|---|
+  | 러너 1대 × 3회 | 28% | 89% | 100% |
+  | 러너 5대 × 3회 합침 | **0%** (0/300) | 69% | 96% |
+
+  같은 데이터에 min_abs_delta 를 올리는 방식(GOMS #149 값)은 러너 1대 기준 오탐을 22% 까지밖에 못 줄였고
+  탐지율만 떨어졌다. 편차를 기준값으로 덮는 게 아니라 baseline 이 편차를 알게 하는 게 맞다.
+- 그래서 `rebaseline` 은 1차 measure 러너 + `baseline-runners`−1 대를 병렬로 띄워 같은 커밋을 재고,
+  `perfkit aggregate --runs A B C ...` 로 모든 표본을 합쳐 median/MAD 를 낸다. 기본 5대.
+- PR 쪽은 그대로 러너 한 대다. 러너 간 편차는 baseline noise 로 흡수하고, 그래도 넘는 건 §6.7 재측정이 거른다.
+- 비용: rebaseline 한 번에 러너 N대. 자주 하는 작업이 아니라 감수한다.
 
 ---
 

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       rebaseline:
-        description: '현재 측정값으로 baseline 을 갱신하는 PR 생성'
+        description: '현재 측정값으로 baseline 을 갱신해 이 브랜치에 커밋'
         type: boolean
         default: false
       repeats:
