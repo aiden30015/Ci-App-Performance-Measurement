@@ -15,6 +15,12 @@ on:
         description: 'perfkit 자체(tool/driver/dashboard) 버전. 팀 프로젝트라면 main 대신 태그 고정을 권장'
         type: string
         default: main
+      flutter-version:
+        description: >-
+          측정에 쓸 Flutter 버전 (예: '3.38.0'). 비우면 그때의 최신 stable 을 쓰므로
+          앱 변경 없이도 값이 달라질 수 있다. 앱의 CI 와 같은 버전으로 고정할 것을 권장.
+        type: string
+        default: ''
       rebaseline:
         description: '현재 측정값으로 baseline 을 갱신해 이 브랜치에 커밋'
         type: boolean
@@ -175,6 +181,7 @@ jobs:
         with:
           scenarios: ${{ needs.select.outputs.scenarios }}
           repeats: ${{ inputs.repeats }}
+          flutter-version: ${{ inputs.flutter-version }}
           env-file: ${{ secrets.env_file }}
 
       - name: Check against baseline
@@ -221,6 +228,7 @@ jobs:
         with:
           scenarios: ${{ needs.measure.outputs.retry }}
           repeats: ${{ inputs.repeats }}
+          flutter-version: ${{ inputs.flutter-version }}
           env-file: ${{ secrets.env_file }}
           runs-dir: runs-retry
           out: retry.json
@@ -258,6 +266,7 @@ jobs:
       - uses: ./_perfkit/.github/actions/measure
         with:
           repeats: ${{ inputs.repeats }}
+          flutter-version: ${{ inputs.flutter-version }}
           env-file: ${{ secrets.env_file }}
 
       - uses: actions/upload-artifact@v4
@@ -425,6 +434,8 @@ jobs:
           REF: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          # 파이프 뒤의 tee 가 perfkit 의 실패를 가리지 않게 한다.
+          set -o pipefail
           PYTHONPATH=_perfkit/tool python -m perfkit rebaseline \
             --current pooled.json --commit "${{ github.sha }}" | tee rebaseline.log
           git config user.name  'github-actions[bot]'

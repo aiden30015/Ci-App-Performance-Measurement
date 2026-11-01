@@ -66,7 +66,12 @@ def failed(rows: list[dict]) -> list[dict]:
     return [r for r in rows if r.get("verdict") == "fail"]
 
 
+def incomplete(rows: list[dict]) -> list[str]:
+    """측정 실패로 볼 시나리오: 결과·표본이 없거나 baseline 의 지표가 사라진 것 (DESIGN §6.5)."""
+    return sorted({r["scenario"] for r in rows if r.get("status") in ("missing", "gone")})
+
+
 def retry_targets(rows: list[dict]) -> list[str]:
-    """다시 측정할 시나리오: 회귀가 난 것 + 결과가 아예 없는 것 (DESIGN §6.7)."""
-    return sorted({r["scenario"] for r in rows
-                   if r.get("verdict") == "fail" or r.get("status") == "missing"})
+    """다시 측정할 시나리오: 회귀가 난 것 + 측정이 불완전한 것 (DESIGN §6.7)."""
+    return sorted({r["scenario"] for r in rows if r.get("verdict") == "fail"}
+                  | set(incomplete(rows)))

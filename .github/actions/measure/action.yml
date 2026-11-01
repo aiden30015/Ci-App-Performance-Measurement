@@ -11,6 +11,9 @@ inputs:
   repeats:
     description: '반복 측정 횟수 (비면 perf.yaml)'
     default: ''
+  flutter-version:
+    description: '측정에 쓸 Flutter 버전 (비면 최신 stable)'
+    default: ''
   env-file:
     description: 'assets/env/{dev,prod}.env 내용 (perf-reusable.yml 의 env_file 시크릿)'
     default: ''
@@ -31,6 +34,7 @@ runs:
     - uses: subosito/flutter-action@v2
       with:
         channel: stable
+        flutter-version: ${{ inputs.flutter-version }}
         cache: true
     - uses: actions/setup-python@v5
       with:

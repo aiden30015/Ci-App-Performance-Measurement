@@ -44,6 +44,16 @@ def _csv(v: str | None) -> list[str]:
     return [x.strip() for x in (v or "").split(",") if x.strip()]
 
 
+def _flutter_version(flutter: str) -> str | None:
+    """측정에 쓴 Flutter 버전. 알아내지 못해도 측정을 막지는 않는다."""
+    try:
+        out = subprocess.check_output([flutter, "--version", "--machine"], text=True,
+                                      encoding="utf-8", timeout=120)
+        return json.loads(out[out.index("{"):]).get("frameworkVersion")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 def _trace_startup(flutter: str, a, out: Path) -> None:
     """app_startup 시나리오: Flutter 공식 `--trace-startup` 으로 콜드 스타트를 잰다.
 
@@ -86,6 +96,10 @@ def cmd_run(a) -> int:
     repeats = a.repeats or int(cfg.get("repeats", 3))
     only = _csv(a.scenarios)          # 비면 perf.yaml 의 전체
     drive_only = [x for x in only if x != "app_startup"]
+    # run-*/ 바깥에 둬서 aggregate 의 표본 수집과 섞이지 않게 한다.
+    Path(a.out).mkdir(parents=True, exist_ok=True)
+    (Path(a.out) / "meta.json").write_text(
+        json.dumps({"flutter_version": _flutter_version(flutter)}), encoding="utf-8")
     for i in range(1, repeats + 1):
         out = Path(a.out) / f"run-{i}"
         # 이전 실행 결과를 남겨두면, 이번에 실패한 시나리오가 옛 값으로 조용히
@@ -133,6 +147,10 @@ def cmd_aggregate(a) -> int:
     dirs = [d for r in a.runs for d in _run_dirs(Path(r))]
     current = metrics.aggregate(dirs,
                                 _csv(a.scenarios) or cfg.get("scenarios"))
+    meta = Path(a.runs[0]) / "meta.json"
+    if meta.exists():
+        current["flutter_version"] = json.loads(
+            meta.read_text(encoding="utf-8")).get("flutter_version")
     Path(a.out).write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
     print(f"[perfkit] {a.out}: {len(current['scenarios'])} scenarios "
           f"× {current['repeats']} runs")
@@ -187,6 +205,10 @@ def cmd_check(a) -> int:
         if B.is_stale(base, int(cfg.get("baseline_max_age_days", 30))):
             warnings.append(f"baseline 이 {cfg.get('baseline_max_age_days', 30)}일보다 "
                             "오래됐습니다. rebaseline 을 검토하세요.")
+        base_flutter, cur_flutter = base.get("flutter_version"), current.get("flutter_version")
+        if base_flutter and cur_flutter and base_flutter != cur_flutter:
+            warnings.append(f"Flutter 버전이 baseline 과 다릅니다 (`{base_flutter}` vs "
+                            f"`{cur_flutter}`). 앱 변경 없이도 값이 달라질 수 있습니다.")
 
     only = _csv(a.scenarios)
     notes = [a.note] if a.note else []
@@ -197,7 +219,14 @@ def cmd_check(a) -> int:
         skipped = [x for x in cfg.get("scenarios", []) if x not in only]
         notes.append(f"측정한 시나리오: {', '.join(f'`{x}`' for x in only)}"
                      + (f" · 건너뜀: {', '.join(f'`{x}`' for x in skipped)}" if skipped else ""))
-    rows = detect.judge(B.compare(base, current, only or cfg.get("scenarios", [])), cfg)
+    # --repeats 1 처럼 일부러 적게 돌린 실행까지 실패시키지 않도록 요청한 횟수로 제한한다.
+    min_runs = min(int(cfg.get("min_runs", 2)), int(current.get("repeats") or 1))
+    rows = detect.judge(
+        B.compare(base, current, only or cfg.get("scenarios", []), min_runs), cfg)
+    new = sorted({r["scenario"] for r in rows if r.get("status") == "new"})
+    if new and base.get("scenarios"):
+        warnings.append(f"baseline 에 없는 지표가 있어 비교하지 못했습니다: "
+                        f"{', '.join(f'`{s}`' for s in new)}. rebaseline 전까지 게이트에서 제외됩니다.")
     md = report.render(
         rows,
         headline=cfg.get("headline_metrics", list(metrics.METRICS)),
@@ -212,17 +241,17 @@ def cmd_check(a) -> int:
     Path(a.rows_out).write_text(json.dumps(rows, indent=2), encoding="utf-8")
     print(md)
 
-    # 시나리오가 통째로 비어 있으면 "성능 회귀"가 아니라 "측정 실패"다. 조용히
-    # 통과시키면 게이트가 무의미해지므로 같은 exit 1 로 알린다.
-    missing = [r["scenario"] for r in rows if r.get("status") == "missing"]
-    if missing:
-        print(f"[perfkit] 결과가 없는 시나리오: {', '.join(missing)}", file=sys.stderr)
+    # 결과나 지표가 사라진 건 "성능 회귀"가 아니라 "측정 실패"다. 조용히 통과시키면
+    # 게이트가 무의미해지므로 같은 exit 1 로 알린다.
+    incomplete = detect.incomplete(rows)
+    if incomplete:
+        print(f"[perfkit] 측정이 불완전한 시나리오: {', '.join(incomplete)}", file=sys.stderr)
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:
         # 재측정 job 이 이 목록만 다시 잰다 (DESIGN §6.7).
         with open(gh, "a", encoding="utf-8") as f:
             f.write(f"retry_scenarios={','.join(detect.retry_targets(rows))}\n")
-    return 1 if (detect.failed(rows) or missing) else 0
+    return 1 if (detect.failed(rows) or incomplete) else 0
 
 
 # -------------------------------------------------------------------- merge
@@ -236,11 +265,29 @@ def cmd_merge(a) -> int:
 
 
 # --------------------------------------------------------------- rebaseline
+def _rebaseline_gaps(new: dict, old: dict | None, scenarios: list[str]) -> list[str]:
+    problems = []
+    for name in scenarios:
+        metrics_now = new["scenarios"].get(name, {}).get("metrics", {})
+        if not metrics_now:
+            problems.append(f"{name} 결과 없음")
+            continue
+        lost = set((old or {}).get("scenarios", {}).get(name, {}).get("metrics", {})) - set(metrics_now)
+        if lost:
+            problems.append(f"{name} 지표 소실 ({', '.join(sorted(lost))})")
+    return problems
+
+
 def cmd_rebaseline(a) -> int:
     cfg = load_config(a.config)
     current = json.loads(Path(a.current).read_text(encoding="utf-8"))
     new = B.build(current, a.commit, a.device_profile or cfg.get("device_profile", ""))
     old = B.load(Path(a.out))
+    # 측정이 일부 깨진 값으로 기준을 뜨면 그 시나리오·지표가 게이트에서 영영 빠진다.
+    problems = _rebaseline_gaps(new, old, cfg.get("scenarios") or [])
+    if problems:
+        print("[perfkit] baseline 을 쓰지 않습니다: " + "; ".join(problems), file=sys.stderr)
+        return 1
     B.save(new, Path(a.out))
     print(f"[perfkit] baseline written: {a.out}")
     if old:

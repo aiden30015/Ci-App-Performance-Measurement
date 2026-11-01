@@ -27,6 +27,7 @@ def build(current: dict, commit: str, device_profile: str) -> dict:
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "commit": commit,
         "device_profile": device_profile,
+        "flutter_version": current.get("flutter_version"),
         "repeats": current.get("repeats"),
         "scenarios": {
             name: {
@@ -56,17 +57,19 @@ def is_stale(baseline: dict, max_age_days: int) -> bool:
     return datetime.now(timezone.utc) - updated > timedelta(days=max_age_days)
 
 
-def compare(baseline: dict, current: dict, scenarios: list[str]) -> list[dict]:
+def compare(baseline: dict, current: dict, scenarios: list[str],
+            min_runs: int = 1) -> list[dict]:
     """시나리오 × 지표 행을 만든다. 판정 없이 숫자만 채운다.
 
-    status 는 여기서 'ok'/'new'/'missing' 세 가지만 정한다. 회귀 여부는 detect 가 붙인다.
+    status 는 'ok'/'new'/'gone'/'missing' 만 정한다. 회귀 여부는 detect 가 붙인다.
+    반복이 min_runs 번보다 적게 성공한 시나리오는 noise 를 믿을 수 없어 missing 으로 본다.
     """
     rows: list[dict] = []
     base_s = baseline.get("scenarios", {})
     cur_s = current.get("scenarios", {})
 
     for name in scenarios or sorted(set(base_s) | set(cur_s)):
-        if name not in cur_s:
+        if name not in cur_s or cur_s[name].get("runs", min_runs) < min_runs:
             rows.append({"scenario": name, "metric": None, "status": "missing"})
             continue
         for key, cur in cur_s[name]["metrics"].items():

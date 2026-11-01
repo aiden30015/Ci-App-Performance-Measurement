@@ -35,6 +35,7 @@ def history_records(current: dict, rows: list[dict], meta: dict) -> list[dict]:
             # 대시보드에서 commit/PR/run 으로 바로 넘어가기 위한 저장소 주소.
             "repo": meta.get("repo") or None,
             "device_profile": meta.get("device_profile"),
+            "flutter_version": current.get("flutter_version"),
             "repeats": current.get("repeats"),
             "scenario": name,
             "metrics": {k: v["value"] for k, v in data["metrics"].items()},
