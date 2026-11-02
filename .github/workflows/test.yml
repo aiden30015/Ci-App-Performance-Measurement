@@ -1,0 +1,22 @@
+name: perfkit tests
+
+# 다른 repo 가 이 도구를 불러 쓰므로, 에뮬레이터 측정과 별개로 판정 로직을 검증한다.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      - run: python tool/test_perfkit.py

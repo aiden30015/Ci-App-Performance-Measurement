@@ -1,6 +1,8 @@
 """report-generator. rows → Markdown. 파일 저장은 호출자가 한다."""
 from __future__ import annotations
 
+from . import detect
+
 _ICON = {"fail": "❌", "improved": "🚀", "noisy": "🟡", "pass": "✅",
          "new": "🆕", "gone": "⚠️"}
 
@@ -32,6 +34,7 @@ def render(
     ok_rows = [r for r in rows if r.get("metric")]
     fails = [r for r in ok_rows if r.get("verdict") == "fail"]
     missing = [r["scenario"] for r in rows if r.get("status") == "missing"]
+    incomplete = detect.incomplete(rows)
 
     md = ["## 📊 Flutter Performance Report", ""]
     for n in notes or []:
@@ -45,11 +48,13 @@ def render(
                 f"(**{_change(r)}**, 임계 {r['threshold_pct']}%)"
             )
         md.append("")
-    else:
+    if incomplete:
+        md += [f"### ⚠️ 측정 실패 — {', '.join(f'`{s}`' for s in incomplete)}", ""]
+    if not fails and not incomplete:
         md += ["### ✅ Passed — 회귀 없음", ""]
 
     # 시나리오별 표. 실패한 시나리오를 위로 올린다.
-    failed_scenarios = {r["scenario"] for r in fails}
+    failed_scenarios = {r["scenario"] for r in fails} | set(incomplete)
     scenarios = sorted(
         {r["scenario"] for r in ok_rows},
         key=lambda s: (s not in failed_scenarios, s),
@@ -72,7 +77,8 @@ def render(
             md += ["", "</details>", ""]
 
     if missing:
-        md += [f"> ⚠️ 결과가 없는 시나리오: {', '.join(f'`{s}`' for s in missing)}", ""]
+        md += [f"> ⚠️ 결과가 없거나 표본이 부족한 시나리오: "
+               f"{', '.join(f'`{s}`' for s in missing)}", ""]
     for w in warnings or []:
         md += [f"> ⚠️ {w}", ""]
 
@@ -99,13 +105,12 @@ def render(
 def retry_note(first_rows: list[dict], retried: list[str]) -> str:
     """재측정 안내 한 줄. 1차에서 왜 다시 쟀는지(무엇이 넘었는지)를 남긴다."""
     fails = [r for r in first_rows if r.get("verdict") == "fail"]
-    missing = [r["scenario"] for r in first_rows if r.get("status") == "missing"]
     first = [f"`{r['scenario']} / {r['metric']}` "
              f"{_num(r['baseline'], r['unit'])} → {_num(r['current'], r['unit'])} ({_change(r)})"
              for r in fails]
-    first += [f"`{s}` 결과 없음" for s in missing]
+    first += [f"`{s}` 측정 불완전" for s in detect.incomplete(first_rows)]
     done = ", ".join(f"`{s}`" for s in retried) or "없음"
-    return (f"1차 측정에서 회귀로 판정돼 새 러너에서 다시 측정했습니다 (재측정: {done}). "
+    return (f"1차 측정에서 회귀 또는 측정 실패로 판정돼 새 러너에서 다시 측정했습니다 (재측정: {done}). "
             "아래 표는 재측정 값이고, 재측정에서도 기준을 넘은 것만 실패로 봅니다. "
             f"1차 결과: {'; '.join(first) or '—'}")
 

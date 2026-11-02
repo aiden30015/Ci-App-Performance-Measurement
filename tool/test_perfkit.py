@@ -4,6 +4,7 @@
 노이즈에 흔들리지 않으면서 진짜 회귀는 놓치지 않는가.
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -177,7 +178,8 @@ def test_cli_end_to_end():
         def perfkit(*args, expect=0):
             rc = subprocess.call([sys.executable, "-m", "perfkit", *args],
                                  cwd=d, env={"PYTHONPATH": str(root / "tool"),
-                                             "SYSTEMROOT": "C:/Windows", "PATH": ""})
+                                             "SYSTEMROOT": "C:/Windows", "PATH": "",
+               "APPDATA": os.environ.get("APPDATA", "")})
             assert rc == expect, f"{args} → {rc}"
 
         # 이 테스트는 home_scroll 하나만 만든다. 나머지 시나리오가 missing 으로
@@ -284,7 +286,7 @@ def test_retry_clears_one_off_slow_run_but_keeps_real_regression():
     assert detect.retry_targets(rows) == ["b", "c"]
 
     note = report.retry_note(first, merged["retried"])
-    assert "`a / p95_frame_time_ms`" in note and "`c` 결과 없음" in note
+    assert "`a / p95_frame_time_ms`" in note and "`c` 측정 불완전" in note
 
 
 def test_cli_check_exports_retry_targets():
@@ -299,6 +301,7 @@ def test_cli_check_exports_retry_targets():
         (d / "r.json").write_text(json.dumps({"scenarios": {
             "a": {"metrics": {"fps": {"value": 60.0, "noise": 0.1}}}}}), encoding="utf-8")
         env = {"PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": "",
+               "APPDATA": os.environ.get("APPDATA", ""),
                "GITHUB_OUTPUT": str(d / "out.txt")}
 
         def perfkit(*args):
@@ -327,7 +330,8 @@ def test_aggregate_pools_runners_so_noise_includes_runner_spread():
                 run.mkdir(parents=True)
                 (run / "a.json").write_text(json.dumps(
                     {"scenario": "a", "duration_ms": base + jitter}), encoding="utf-8")
-        env = {"PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": ""}
+        env = {"PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": "",
+               "APPDATA": os.environ.get("APPDATA", "")}
 
         def agg(out, *runs):
             assert subprocess.call([sys.executable, "-m", "perfkit", "aggregate",
@@ -339,6 +343,81 @@ def test_aggregate_pools_runners_so_noise_includes_runner_spread():
         pooled = both["scenarios"]["a"]["metrics"]["duration_ms"]
         assert both["repeats"] == 6 and len(pooled["samples"]) == 6
         assert one["noise"] < 0.5 < pooled["noise"]
+
+
+def test_disappeared_metric_fails_and_is_retried():
+    base = {"scenarios": {"a": {"metrics": {
+        "fps": {"value": 60.0, "noise": 0.1}, "memory_mb": {"value": 200.0, "noise": 1.0}}}}}
+    cur = {"scenarios": {"a": {"metrics": {"memory_mb": {"value": 200.0, "noise": 1.0}}}}}
+    rows = detect.judge(B.compare(base, cur, ["a"]), {})
+    assert detect.incomplete(rows) == ["a"] and detect.retry_targets(rows) == ["a"]
+    md = report.render(rows, headline=["fps"])
+    assert "측정 실패" in md and "Passed" not in md
+
+
+def test_too_few_runs_counts_as_missing():
+    base = {"scenarios": {"a": {"metrics": {"fps": {"value": 60.0, "noise": 0.1}}}}}
+    cur = {"scenarios": {"a": {"runs": 1, "metrics": {"fps": {"value": 60.0, "noise": 0.0}}}}}
+    assert B.compare(base, cur, ["a"], min_runs=2)[0]["status"] == "missing"
+    assert B.compare(base, cur, ["a"], min_runs=1)[0]["status"] == "ok"
+
+
+def _cli(d, *args):
+    root = Path(__file__).resolve().parents[1]
+    return subprocess.call([sys.executable, "-m", "perfkit", *args], cwd=d, env={
+        "PYTHONPATH": str(root / "tool"), "SYSTEMROOT": "C:/Windows", "PATH": "",
+        "APPDATA": os.environ.get("APPDATA", "")})
+
+
+def test_rebaseline_refuses_incomplete_measurement():
+    metric = {"value": 1.0, "noise": 0.0, "samples": [1.0]}
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "perf.yaml").write_text("scenarios: [a, b]\n", encoding="utf-8")
+        (d / "c.json").write_text(json.dumps({"scenarios": {
+            "a": {"metrics": {"fps": metric}}}}), encoding="utf-8")
+        assert _cli(d, "rebaseline", "--current", "c.json", "--out", "b.json") == 1
+        assert not (d / "b.json").exists()              # 불완전하면 파일을 쓰지 않는다
+
+        full = {"scenarios": {"a": {"metrics": {"fps": metric, "memory_mb": metric}},
+                              "b": {"metrics": {"fps": metric}}}}
+        (d / "c.json").write_text(json.dumps(full), encoding="utf-8")
+        assert _cli(d, "rebaseline", "--current", "c.json", "--out", "b.json") == 0
+
+        del full["scenarios"]["a"]["metrics"]["fps"]    # 기존 지표가 사라지면 거부
+        (d / "c.json").write_text(json.dumps(full), encoding="utf-8")
+        assert _cli(d, "rebaseline", "--current", "c.json", "--out", "b.json") == 1
+
+
+def test_cli_check_fails_when_metric_disappears():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "perf.yaml").write_text("device_profile: p\nscenarios: [a]\n", encoding="utf-8")
+        (d / "b.json").write_text(json.dumps({"device_profile": "p", "scenarios": {"a": {
+            "metrics": {"fps": {"value": 60.0, "noise": 0.1}}}}}), encoding="utf-8")
+        (d / "c.json").write_text(json.dumps({"repeats": 3, "scenarios": {"a": {
+            "runs": 3, "metrics": {"memory_mb": {"value": 200.0, "noise": 1.0}}}}}), encoding="utf-8")
+        assert _cli(d, "check", "--baseline", "b.json", "--current", "c.json") == 1
+
+
+def test_flutter_version_flows_to_baseline_and_warns_on_mismatch():
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        (d / "perf.yaml").write_text("device_profile: p\nscenarios: [a]\n", encoding="utf-8")
+        for i in (1, 2):
+            run = d / "runs" / f"run-{i}"
+            run.mkdir(parents=True)
+            (run / "a.json").write_text(json.dumps(
+                {"scenario": "a", "duration_ms": 100}), encoding="utf-8")
+        (d / "runs" / "meta.json").write_text('{"flutter_version": "3.38.0"}', encoding="utf-8")
+        assert _cli(d, "aggregate") == 0
+        assert _cli(d, "rebaseline", "--out", "b.json") == 0
+        assert json.loads((d / "b.json").read_text(encoding="utf-8"))["flutter_version"] == "3.38.0"
+
+        (d / "runs" / "meta.json").write_text('{"flutter_version": "3.47.7"}', encoding="utf-8")
+        assert _cli(d, "aggregate") == 0
+        assert _cli(d, "check", "--baseline", "b.json") == 0     # 경고만, 실패는 아니다
+        assert "3.47.7" in (d / "perf_report.md").read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -229,6 +229,7 @@ append-only. 시나리오를 행에 풀어놨기 때문에 나중에 SQLite/Parq
 
 ### 6.1 러너 성능 차이
 - 러너 이미지·API level·에뮬레이터 옵션을 `perf.yaml` 의 `device_profile` 로 고정하고, baseline·history 에 함께 기록한다.
+- Flutter 버전은 `flutter-version` 입력으로 고정하고 baseline·history 에 기록한다. baseline 과 다르면 리포트에 경고한다.
 - **profile 이 다르면 비교하지 않는다** (detector 가 경고 후 skip). 다른 하드웨어의 절대값 비교는 무의미하다.
 - 러너 변동을 아예 제거하고 싶으면 코드 변경 없이 가능:
   base 커밋을 같은 러너에서 측정 → `perfkit rebaseline --from runs-base --out /tmp/base.json` → 그 파일로 `check`.
@@ -272,6 +273,11 @@ append-only. 시나리오를 행에 풀어놨기 때문에 나중에 SQLite/Parq
   **받은 데이터를 먼저 저장한 뒤** 종료 코드로만 실패를 알린다.
 - 결과가 아예 없는 시나리오는 "회귀 없음"이 아니라 **측정 실패**다. `check` 는 이 경우에도
   exit 1 을 낸다. 조용히 통과시키면 테스트가 깨진 채로 게이트가 무력화된다.
+- 같은 이유로 baseline 에 있던 지표가 사라진 경우(`gone`)와 성공한 반복이 `min_runs` 보다 적은
+  경우도 측정 실패다. 둘 다 §6.7 재측정 대상이다. baseline 에 없는 지표(`new`)는 시나리오를 새로
+  추가하는 PR 을 막지 않도록 통과시키되 리포트에 경고한다.
+- `rebaseline` 은 `perf.yaml` 의 시나리오나 기존 지표가 빠진 측정값으로는 파일을 쓰지 않는다.
+  빠진 채로 기준을 뜨면 그 항목이 게이트에서 영구히 제외된다.
 
 ### 6.6 알려진 한계 (정직하게 기록)
 - `startup_ms` 는 `flutter run --trace-startup` 의 `timeToFirstFrameMicros` 다.
